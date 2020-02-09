@@ -1,0 +1,76 @@
+//  Let's look at the movies.csv file
+externaldata (text:string)
+[@"https://vpldata.blob.core.windows.net/datasets/movie-lens/movies.csv;impersonate"]
+with (format='txt')
+| limit 20
+
+//  It is in a CSV format but has composite fields
+//  So we'll extract with CSV and then transform it to normalize
+.set-or-replace movies <| externaldata (
+movieId:int,
+compositeTitle:string,
+genresArray:string)
+[@"https://vpldata.blob.core.windows.net/datasets/movie-lens/movies.csv;impersonate"]
+with (format='csv', ignoreFirstRecord=true)
+//  Make the genres an array, splitting by pipes
+| extend genres = split(genresArray, '|')
+//  Extract movie title using a reg-ex
+| extend movieTitle = extract(@"(.*)\s*\((\d+)\)", 1, compositeTitle)
+//  Extract movie year using a reg-ex
+| extend year = toint(extract(@"(.*)\s*\((\d+)\)", 2, compositeTitle))
+//  Take only relevant columns
+| project movieId, movieTitle, genres, year
+
+//  Let's look at ratings.csv file
+externaldata (text:string)
+[@"https://vpldata.blob.core.windows.net/datasets/movie-lens/ratings.csv;impersonate"]
+with (format='txt')
+| limit 20
+
+//  It is purely CSV
+//  Since it's a big file, we'll load it asynchronously
+.set-or-replace async ratings <| externaldata (
+userId:int,
+movieId:int,
+rating:real,
+timeStamp:int)
+[@"https://vpldata.blob.core.windows.net/datasets/movie-lens/ratings.csv;impersonate"]
+with (format='csv', ignoreFirstRecord=true)
+
+//  Movie distribution in time
+movies
+| where isnotnull(year)
+| summarize count() by year
+| render columnchart 
+
+//  Movie distribution by genre
+//  That is an interesting one as the genre column is an array
+movies
+//  Expend the genres into multiple rows
+| mv-expand genres to typeof(string)
+| summarize size=count() by genres
+//  Sort to make the pie chart look nicer
+| sort by size
+| render piechart
+
+//  What movies got the most ratings?
+movies
+| join ratings on movieId
+| summarize size=count() by movieTitle
+| top 5 by size
+| render columnchart 
+
+//  What movies got the best ratings?
+movies
+| join ratings on movieId
+| summarize size=count(), rating=avg(rating) by movieTitle
+| top 5 by rating
+
+//  That last metric isn't interesting since it gives odd-ratings
+//  Instead, let's look at the movie which sums the best rating or has the best "weight" of ratings
+movies
+| join ratings on movieId
+| summarize rating=sum(rating) by movieTitle
+| top 5 by rating
+| render columnchart 
+

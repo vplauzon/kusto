@@ -1,0 +1,114 @@
+//  Using externaldata, cf https://docs.microsoft.com/en-us/azure/kusto/query/externaldata-operator
+//  Using storage connections defined in https://docs.microsoft.com/en-us/azure/kusto/api/connection-strings/storage
+//  [@"abfss://datasets@vpldata.dfs.core.windows.net/academic-graph/ConferenceSeries.nt;impersonate"] FAILED
+//  Using the txt format to explore (cf https://docs.microsoft.com/en-us/azure/kusto/management/data-ingestion/#supported-data-formats)
+externaldata (text:string)
+//  Don't forget to have a role assignment of 'Storage Blob Data Reader' in order for impersonate to work
+[@"abfss://datasets@vpldata.dfs.core.windows.net/adults/adult.data;impersonate"]
+with (format='txt')
+| top 10 by text
+
+//  We realize it's a CSV with the schema defined at https://archive.ics.uci.edu/ml/datasets/Adult
+//  Let's look at it as a CSV
+externaldata (
+age:int,
+workclass:string,
+fnlwgt:int,
+education:string,
+educationNum:int,
+maritalStatus:string,
+occupation:string,
+relationship:string,
+race:string,
+sex:string,
+capitalGain:real,
+capitalLoss:real,
+hoursPerWeek: int,
+country:string)
+[@"abfss://datasets@vpldata.dfs.core.windows.net/adults/adult.data;impersonate"]
+with (format='csv')
+| top 10 by age
+
+//  It looks good, let's ingest it in an ADX table
+.set-or-replace main <| externaldata (
+age:int,
+workclass:string,
+fnlwgt:int,
+education:string,
+educationNum:int,
+maritalStatus:string,
+occupation:string,
+relationship:string,
+race:string,
+sex:string,
+capitalGain:real,
+capitalLoss:real,
+hoursPerWeek: int,
+country:string)
+[@"abfss://datasets@vpldata.dfs.core.windows.net/adults/adult.data;impersonate"]
+with (format='csv')
+
+//  Now let's look at the data itself
+//  How big is the data set?
+main
+|count
+
+//  Let's look at the age distribution
+main
+| summarize size=count() by bin(age, 5)
+| render columnchart
+
+//  Let's look at the education distribution
+main
+| summarize size=count() by education
+| sort by size desc
+| render columnchart
+
+//  Gender
+main
+| summarize size=count() by sex
+| render piechart 
+
+//  Is there are relation between the education and capital gain?
+main
+| summarize capitalGain=avg(capitalGain) by education
+| sort by capitalGain
+| top 10 by capitalGain
+| render columnchart
+
+//  Gender equality?
+main
+| summarize capitalGain=avg(capitalGain) by sex
+
+//  Does ethnicity influence salary?
+main
+| summarize capitalGain=avg(capitalGain) by race
+| sort by capitalGain
+| render columnchart
+
+//  Occupation?
+main
+| summarize capitalGain=avg(capitalGain) by occupation
+| top 10 by capitalGain
+| render columnchart
+
+//  Hours per week?
+main
+| summarize capitalGain=avg(capitalGain) by bin(hoursPerWeek, 4)
+| sort by capitalGain
+| render columnchart
+
+//  Occupation by gender
+main
+| summarize size=count() by occupation, sex
+| sort by size
+| render columnchart
+
+//  Occupation remuneration by gender
+main
+| summarize capitalGain=avg(capitalGain) by occupation, sex=trim(" ", sex)
+| extend male = case(sex=="Male", capitalGain, 0.0)
+| extend female = case(sex=="Female", capitalGain, 0.0)
+| summarize male=sum(male), female=sum(female) by occupation
+| sort by female, male
+| render columnchart

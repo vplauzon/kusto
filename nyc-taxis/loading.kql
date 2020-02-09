@@ -1,0 +1,45 @@
+//  Let's look at one transactional file as a sample
+//  Using externaldata, cf https://docs.microsoft.com/en-us/azure/kusto/query/externaldata-operator
+//  Using storage connections defined in https://docs.microsoft.com/en-us/azure/kusto/api/connection-strings/storage
+externaldata (text:string)
+//  Don't forget to have a role assignment of 'Storage Blob Data Reader' in order for impersonate to work
+[@"abfss://datasets@vpldata.dfs.core.windows.net/nyc-taxis/transactional-data/year=2017/month=02/type=green/green_tripdata_2017-02.csv;impersonate"]
+//  Using the txt format to explore (cf https://docs.microsoft.com/en-us/azure/kusto/management/data-ingestion/#supported-data-formats)
+with (format='txt')
+| limit 50
+
+//  It is a CSV file
+//  Let's try a schema on it
+.create external table tx(
+vendorID:int,
+lpep_pickup_datetime:datetime ,
+lpep_dropoff_datetime:datetime,
+store_and_fwd_flag:string,
+RatecodeID:int,
+PULocationID:int,
+DOLocationID:int,
+passenger_count:int,
+trip_distance:real ,
+fare_amount:real ,
+extra:real ,
+mta_tax:real ,
+tip_amount:real ,
+tolls_amount:real ,
+ehail_fee:real ,
+improvement_surcharge:real,
+total_amount:real,
+payment_type:int,
+trip_type:int,
+trip_colour:string) 
+//  Important to have kind as 'adl' since it's a folder
+kind=adl
+partition by format_datetime="'year='yyyy/'month='MM" bin(lpep_pickup_datetime, 1m), "type="trip_colour
+dataformat=csv (@"abfss://datasets@vpldata.dfs.core.windows.net/nyc-taxis/transactional-data/;impersonate")
+with (IncludeHeaders=All)
+| limit 50
+
+// .drop external table tx
+
+external_table("tx")
+//| limit 20
+ | summarize count()
