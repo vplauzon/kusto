@@ -5,25 +5,37 @@
     },
     "variables": {
         "Unique ID": "[uniqueString(resourceGroup().id)]",
-        "cluster name": "[concat('adx-cluster-', variables('Unique ID'))]"
+        "Cluster Name": "[concat('cluster', variables('Unique ID'))]",
+        "Storage Account Name": "[concat('adxstorage', variables('Unique ID'))]"
     },
     "resources": [
         {
             "type": "Microsoft.Kusto/clusters",
             "apiVersion": "2019-05-15",
-            "name": "[variables('cluster name')]",
+            "name": "[variables('Cluster Name')]",
             "location": "[resourceGroup().location]",
             "sku": {
                 "name": "Dev(No SLA)_Standard_D11_v2",
                 "capacity": "1",
                 "tier": "basic"
             },
-            "zones": [
-            ],
             "properties": {
             },
             "resources": [
             ]
+        },
+        {
+            "apiVersion": "2019-04-01",
+            "type": "Microsoft.Storage/storageAccounts",
+            "name": "[variables('Storage Account name')]",
+            "location": "[resourceGroup().location]",
+            "kind": "StorageV2",
+            "sku": {
+                "name": "Standard_LRS"
+            },
+            "properties": {
+                "supportsHttpsTrafficOnly": true
+            }
         }
     ],
     "outputs": {
