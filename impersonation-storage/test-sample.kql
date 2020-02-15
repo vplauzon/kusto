@@ -1,0 +1,21 @@
+//  Using externaldata, cf https://docs.microsoft.com/en-us/azure/kusto/query/externaldata-operator
+//  Using storage connections defined in https://docs.microsoft.com/en-us/azure/kusto/api/connection-strings/storage
+//  Using the txt format to explore (cf https://docs.microsoft.com/en-us/azure/kusto/management/data-ingestion/#supported-data-formats)
+
+//  Replace adxstoragex4g7uxmmzqefy with the name of your storage account
+//  Copy sample.csv in the unique container (named data) of the storage account
+
+//  This should failed for access control reason
+//  Create a role assignment of 'Storage Blob Data Reader' on the storage account for the user logged in to ADX
+//  This is required in order for impersonate to work
+//  Once the role assignment is done, it might take a little while before the access is unlocked (time for permissions to propagate)
+externaldata (text:string)
+[@"abfss://data@adxstoragex4g7uxmmzqefy.dfs.core.windows.net/sample.csv;impersonate"]
+with (format='txt')
+
+//  Now that we've looked at the text file, we know what the schema is
+//  We can now read it in CSV format
+externaldata (name:string, age:int)
+[@"abfss://data@adxstoragex4g7uxmmzqefy.dfs.core.windows.net/sample.csv;impersonate"]
+with (format='csv', ignoreFirstRecord=true)
+

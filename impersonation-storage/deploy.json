@@ -6,7 +6,9 @@
     "variables": {
         "Unique ID": "[uniqueString(resourceGroup().id)]",
         "Cluster Name": "[concat('cluster', variables('Unique ID'))]",
-        "Storage Account Name": "[concat('adxstorage', variables('Unique ID'))]"
+        "Database Name": "test",
+        "Storage Account Name": "[concat('adxstorage', variables('Unique ID'))]",
+        "Storage Container Name": "data"
     },
     "resources": [
         {
@@ -22,6 +24,19 @@
             "properties": {
             },
             "resources": [
+                {
+                    "type": "databases",
+                    "apiVersion": "2019-05-15",
+                    "name": "[variables('Database Name')]",
+                    "location": "[resourceGroup().location]",
+                    "dependsOn": [
+                        "[resourceId('Microsoft.Kusto/clusters', variables('Cluster Name'))]"
+                    ],
+                    "properties": {
+                    },
+                    "resources": [
+                    ]
+                }
             ]
         },
         {
@@ -34,8 +49,22 @@
                 "name": "Standard_LRS"
             },
             "properties": {
+                "isHnsEnabled": true,
                 "supportsHttpsTrafficOnly": true
-            }
+            },
+            "resources": [
+                {
+                    "apiVersion": "2019-04-01",
+                    "type": "blobServices/containers",
+                    "name": "[concat('default/', variables('Storage Container Name'))]",
+                    "dependsOn": [
+                        "[resourceId('Microsoft.Storage/storageAccounts', variables('Storage Account name'))]"
+                    ],
+                    "properties": {
+                        "publicAccess": "None"
+                    }
+                }
+            ]
         }
     ],
     "outputs": {
