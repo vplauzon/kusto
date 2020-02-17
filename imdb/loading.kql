@@ -1,6 +1,10 @@
+//  We are going to use the IMDB extractor data set
+//  This data set is available at http://www.wandora.org/wandora/wiki/index.php?title=IMDB_extractor
+
 //  Let's look at the movies.csv file
+//  Do not forget to change the URL to the ADLS storage where the IMDB data is
 externaldata (text:string)
-[@"https://vpldata.blob.core.windows.net/datasets/movie-lens/movies.csv;impersonate"]
+[@"abfss://datasets@vpldata.dfs.core.windows.net/movie-lens/movies.csv;impersonate"]
 with (format='txt')
 | limit 20
 
@@ -10,7 +14,7 @@ with (format='txt')
 movieId:int,
 compositeTitle:string,
 genresArray:string)
-[@"https://vpldata.blob.core.windows.net/datasets/movie-lens/movies.csv;impersonate"]
+[@"abfss://datasets@vpldata.dfs.core.windows.net/movie-lens/movies.csv;impersonate"]
 with (format='csv', ignoreFirstRecord=true)
 //  Make the genres an array, splitting by pipes
 | extend genres = split(genresArray, '|')
@@ -23,7 +27,7 @@ with (format='csv', ignoreFirstRecord=true)
 
 //  Let's look at ratings.csv file
 externaldata (text:string)
-[@"https://vpldata.blob.core.windows.net/datasets/movie-lens/ratings.csv;impersonate"]
+[@"abfss://datasets@vpldata.dfs.core.windows.net/movie-lens/ratings.csv;impersonate"]
 with (format='txt')
 | limit 20
 
@@ -34,10 +38,10 @@ userId:int,
 movieId:int,
 rating:real,
 timeStamp:int)
-[@"https://vpldata.blob.core.windows.net/datasets/movie-lens/ratings.csv;impersonate"]
+[@"abfss://datasets@vpldata.dfs.core.windows.net/movie-lens/ratings.csv;impersonate"]
 with (format='csv', ignoreFirstRecord=true)
 
-//  Movie distribution in time
+//  Let's look at the movie distribution in time
 movies
 | where isnotnull(year)
 | summarize count() by year
@@ -73,4 +77,3 @@ movies
 | summarize rating=sum(rating) by movieTitle
 | top 5 by rating
 | render columnchart 
-
