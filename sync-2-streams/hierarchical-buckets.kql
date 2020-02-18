@@ -45,25 +45,52 @@
     | project assetId, timeStamp, temperature
 )
 
+//  Define extractTimeMapping as a function
+//  We could easily reuse it this way
+// Assuming T1 is smaller than T2 (for join order)
 let extractTimeMapping = (
-    T1:(assetId:int, timeStamp:datetime),
-    T2:(assetId:int, timeStamp:datetime),
+    T1:(assetId:long, timeStamp:datetime),
+    T2:(assetId:long, timeStamp:datetime),
     maxDelta:timespan,
     subBucketCount:int) {
     let subBucketLength = 2 * maxDelta / subBucketCount;
     let minTimeStampT2 = toscalar(T2 | summarize min(timeStamp));
     let maxTimeStampT2 = toscalar(T2 | summarize max(timeStamp));
     //  Pre-compute max time stamp for each sub-buckets
-    let preComputeMax=range startTimeStamp from bin(minTimeStampT2, subBucketLength) to bin(maxTimeStampT2, subBucketLength) step subBucketLength
+    let preComputeMaxT2=range timeKey from bin(minTimeStampT2, subBucketLength) to bin(maxTimeStampT2, subBucketLength) step subBucketLength
     | join kind=inner
     (
         T2
-        | extend timeKey = bin(timeStamp, subBucketLength)) on $left.startTimeStamp==$right.timeKey
-    | summarize maxTimeStamp=max(timeStamp) by assetId, startTimeStamp;
+        | extend timeKey = bin(timeStamp, subBucketLength)) on timeKey
+    | summarize timeStamp=max(timeStamp) by assetId, timeKey;
+    //  Augment T2 with a time key
+    let withTimeKeysT2 = T2
+    | extend timeKey = bin(timeStamp, subBucketLength);
+    let mergedT2 = materialize(
+    withTimeKeysT2
+    | extend isPrimary=true
+    | union
+    (
+        preComputeMaxT2
+        | extend isPrimary=false
+    ));
+    //  Augment T1 with a time key, duplicating to catch earlier events in T2
+    let withTimeKeysT1 = T1
+    | extend timeKey = bin(timeStamp, subBucketLength)
+    //  Introduce a constant to force cross-product
+    | extend c=1
+    | join kind=inner (range s from 0 to subBucketCount-1 step 1 | extend c=1) on c
+    | project assetId, timeStamp, isPrimary=(s==0), timeKey=timeKey-(s*subBucketLength);
+    //  Finally join the two sides
+    let finalJoin = withTimeKeysT1
+    | join kind=inner mergedT2 on assetId, timeKey
+    | where timeStamp >= timeStamp1
+    | summarize timeStampT2=max(timeStamp1) by assetId, timeStampT1=timeStamp;
+    finalJoin
 };
-let colour1 = colours
+//  We simply normalize colours and temperatures table to fit expected schema
+let colour1 = fullColours
 | project assetId, timeStamp;
-let temp1 = temperatures
+let temp1 = fullTemperatures
 | project assetId, timeStamp;
-extractTimeMapping(colour1, temp1, 1s, 60);
-temperatures
+extractTimeMapping(colour1, temp1, 5s, 40)
