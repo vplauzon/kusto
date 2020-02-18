@@ -1,6 +1,3 @@
-//  First, let's create a database to host a few tables we're going to create
-.create database test2streams
-
 //  Let's create some sensor data
 //  First we measure the "colour" of an asset every even seconds
 .set-or-replace colours <| datatable(assetId:int, timeStamp:datetime, colour:string)
