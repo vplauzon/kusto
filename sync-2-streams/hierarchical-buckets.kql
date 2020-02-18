@@ -1,0 +1,69 @@
+//  Let's re-create some sensor data
+//  First we measure the "colour" of an asset every even seconds
+.set-or-replace colours <| datatable(assetId:int, timeStamp:datetime, colour:string)
+    [
+    12, datetime(2020-1-1 20:00:04), "blue",
+    12, datetime(2020-1-1 20:00:06), "blue",
+    12, datetime(2020-1-1 20:00:08), "red",
+    13, datetime(2020-1-1 20:00:04), "yellow",
+    13, datetime(2020-1-1 20:00:06), "yellow",
+    13, datetime(2020-1-1 20:00:08), "green",
+    ];
+
+//  Then we measure the temperature of an asset every odd seconds
+.set-or-replace temperatures <| datatable(assetId:int, timeStamp:datetime, temperature:int)
+    [
+    12, datetime(2020-1-1 20:00:05), 20,
+    12, datetime(2020-1-1 20:00:07), 22,
+    12, datetime(2020-1-1 20:00:09), 25,
+    13, datetime(2020-1-1 20:00:05), 15,
+    13, datetime(2020-1-1 20:00:07), 13,
+    13, datetime(2020-1-1 20:00:09), 10,
+    ];
+
+//  Let's create 10 millions records colour table (with 5000 assets)
+.set-or-replace fullColours <|
+(
+    range i from 0 to 10000000 step 1
+    | extend assetId = 1 + i % 5000
+    | extend timeStep = i / 5000
+    | extend timeStamp = datetime(2010-1-1 0:00:00) + timeStep * 2s
+    | extend r = rand(3)
+    | extend colour = case(r==0, "green", r==1, "yellow", "red")
+    | project assetId, timeStamp, colour
+)
+
+//  Let's create 20 millions records (5000 assets) temperature table
+//  It covers the same time range but with twice the measurement frequency
+.set-or-replace fullTemperatures <|
+(
+    range i from 0 to 20000000 step 1
+    | extend assetId = 1 + i % 5000
+    | extend timeStep = i / 5000
+    | extend timeStamp = datetime(2010-1-1 0:00:00) + timeStep * 1s
+    | extend temperature = 10 + rand(25)
+    | project assetId, timeStamp, temperature
+)
+
+let extractTimeMapping = (
+    T1:(assetId:int, timeStamp:datetime),
+    T2:(assetId:int, timeStamp:datetime),
+    maxDelta:timespan,
+    subBucketCount:int) {
+    let subBucketLength = 2 * maxDelta / subBucketCount;
+    let minTimeStampT2 = toscalar(T2 | summarize min(timeStamp));
+    let maxTimeStampT2 = toscalar(T2 | summarize max(timeStamp));
+    //  Pre-compute max time stamp for each sub-buckets
+    let preComputeMax=range startTimeStamp from bin(minTimeStampT2, subBucketLength) to bin(maxTimeStampT2, subBucketLength) step subBucketLength
+    | join kind=inner
+    (
+        T2
+        | extend timeKey = bin(timeStamp, subBucketLength)) on $left.startTimeStamp==$right.timeKey
+    | summarize maxTimeStamp=max(timeStamp) by assetId, startTimeStamp;
+};
+let colour1 = colours
+| project assetId, timeStamp;
+let temp1 = temperatures
+| project assetId, timeStamp;
+extractTimeMapping(colour1, temp1, 1s, 60);
+temperatures
