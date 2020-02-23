@@ -1,0 +1,11 @@
+//  First let's create two tables representing ingestion raw data
+.create table rawT1(assetId:string, timestamp:datetime, measure:decimal)
+.create table rawT2(assetId:string, timestamp:datetime, measure:decimal)
+
+//  Let's then create a table representing the mapping between the
+//  times in the two tables
+.create table mappingT1T2(
+    assetId:string,
+    timestamp1:datetime,
+    timestamp2:datetime,
+    version:int)
