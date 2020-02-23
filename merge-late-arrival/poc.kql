@@ -1,11 +1,192 @@
 //  First let's create two tables representing ingestion raw data
-.create table rawT1(assetId:string, timestamp:datetime, measure:decimal)
-.create table rawT2(assetId:string, timestamp:datetime, measure:decimal)
+//  To simplify the process, we express timestamp as integer
+//  Obviously those would be datetime in a real system
+.create table rawT1(assetId:string, timestamp:long, measure:decimal)
 
-//  Let's then create a table representing the mapping between the
+.create table rawT2(assetId:string, timestamp:long, measure:decimal)
+
+//  Let's then create tables representing the mapping between the
 //  times in the two tables
-.create table mappingT1T2(
+//  First one getting updated from rawT1
+.create table mappingFromT1(
     assetId:string,
-    timestamp1:datetime,
-    timestamp2:datetime,
-    version:int)
+    timestamp1:long,
+    timestamp2:long)
+
+//  Then one getting updated from rawT2
+.create table mappingFromT2(
+    assetId:string,
+    timestamp1:long,
+    timestamp2:long)
+
+//.drop table rawT1
+//.drop table rawT2
+//.drop table mappingFromT1
+//.drop table mappingFromT2
+
+//  Let's create a function acting as a view to the mappings with latest times
+.create function viewMappingFromT1()
+{
+    mappingFromT1
+    //  Take only the maximum timestamp2
+    | summarize timestamp2=max(timestamp2) by assetId, timestamp1
+}
+
+.create function viewMappingFromT2()
+{
+    mappingFromT2
+    //  Take only the maximum timestamp2
+    | summarize timestamp2=max(timestamp2) by assetId, timestamp1
+}
+
+//  Let's create a function acting as a view to the mappings
+.create function viewMapping()
+{
+    viewMappingFromT1()
+    //  Cross both views which should have only one timestamp2 record (for each view)
+    //  for each assetId & timestamp1
+    | join kind=fullouter viewMappingFromT2() on assetId, timestamp1
+    //  See which view has the max timestamp2
+    | extend maxTimestamp2 = case(isnull(timestamp2), timestamp21, isnull(timestamp21), timestamp2, max_of(timestamp2, timestamp21))
+    | project assetId=coalesce(assetId, assetId1), timestamp1=coalesce(timestamp1, timestamp11), timestamp2=maxTimestamp2
+}
+
+//  Let's define a max delta for the database
+.create function viewMaxDelta()
+{
+    10
+}
+
+//  Let's create a function creating a mapping between two streams
+//  Assuming the time on the first stream must be "after" the
+//  mapped time on the second stream
+.create function extractTimeMapping(
+    T1:(assetId:string, timestamp:long),
+    T2:(assetId:string, timestamp:long),
+    maxDelta:long) {
+    let prepT1 = T1
+        | project-rename timestamp1=timestamp
+        //  Create an array of 2 values for the time keys
+        | extend timeKey=pack_array(
+            bin(timestamp1-maxDelta, maxDelta),
+            bin(timestamp1, maxDelta))
+        //  Expand that array into 2 rows
+        | mv-expand timeKey to typeof(long);
+    let prepT2 = T2
+        | project-rename timestamp2=timestamp
+        | extend timeKey=bin(timestamp2, maxDelta);
+    let mapping = prepT1
+        | join kind=leftouter prepT2 on assetId, timeKey
+        | where isnull(timestamp2) or timestamp1 > timestamp2
+        | summarize timestamp2=max(timestamp2) by assetId, timestamp1;
+    mapping
+}
+
+//  Now let's create the update policy functions
+
+//  Let's create functions we'll use for update policy on mappingT1T2FromT1
+.create function updateMappingFromRawT1()
+{
+    extractTimeMapping(rawT1, rawT2, viewMaxDelta)
+}
+
+.create function updateMappingFromRawT2()
+{
+    extractTimeMapping(rawT1, rawT2, viewMaxDelta)
+}
+
+//.drop function viewMappingFromT1
+//.drop function viewMappingFromT2
+//.drop function viewMapping
+//.drop function viewMaxDelta
+//.drop function extractTimeMapping
+//.drop function updateMappingFromRawT1
+//.drop function updateMappingFromRawT2
+
+//  Let's attach those functions as update policies
+.alter table mappingFromT1 policy update
+@'[{"IsEnabled": true, "Source": "rawT1", "Query": "updateMappingFromRawT1()", "IsTransactional": true, "PropagateIngestionProperties": false}]'
+
+.alter table mappingFromT2 policy update
+@'[{"IsEnabled": true, "Source": "rawT2", "Query": "updateMappingFromRawT2()", "IsTransactional": true, "PropagateIngestionProperties": false}]'
+
+//  Let's now see how the ingestion will behave
+
+//  Let's start by ingesting a few simple records in rawT1:
+.append rawT1 <| datatable(assetId:string, timestamp:long, measure:decimal)
+[
+'Circle', 10, 12.3,
+'Circle', 20, 12.4,
+'Circle', 30, 0.3,
+'Square', 11, 125,
+'Square', 21, 126.2,
+'Square', 31, 122
+]
+
+//  Let's see how is that reflected in mapping tables
+//  No timestamp2 has been captured, since no ingestion happend in rawT2
+viewMapping | sort by assetId asc, timestamp1 asc | as viewMapping;
+viewMappingFromT1 | as viewMappingFromT1;
+viewMappingFromT2 | as viewMappingFromT2;
+rawT1;
+rawT2
+
+//  Now, let's ingest records in rawT2
+.append rawT2 <| datatable(assetId:string, timestamp:long, measure:decimal)
+[
+'Circle', 12, 2003.3,
+'Circle', 18, 2003.9,
+'Circle', 28, 2004.1,
+'Square', 9, 432,
+'Square', 24, 434.2,
+'Square', 33, 433.89
+]
+
+//  No we can see some timestamp2
+//  Why are 2 still null?
+//  (Circle, 10, null) because there is no (Circle, t, *) in rawT2 (where t<=10)
+//  (Square, 21, null) because, although there is a (Square, t, *) in rawT2 (where t<=21), t<21-maxDelta(10)
+viewMapping | sort by assetId asc, timestamp1 asc | as viewMapping;
+viewMappingFromT1 | as viewMappingFromT1;
+viewMappingFromT2 | as viewMappingFromT2;
+rawT1;
+rawT2
+
+//  Let's insert a circle in rawT2 before the first one in rawT1:
+.append rawT2 <| datatable(assetId:string, timestamp:long, measure:decimal)
+[
+'Circle', 8, 2003.15
+]
+
+//  As expected, the first circle now takes its timestamp2
+viewMapping | sort by assetId asc, timestamp1 asc | as viewMapping;
+viewMappingFromT1 | as viewMappingFromT1;
+viewMappingFromT2 | as viewMappingFromT2;
+rawT1;
+rawT2
+
+//  Let's override the mapping of circle / timestamp1=20:
+.append rawT2 <| datatable(assetId:string, timestamp:long, measure:decimal)
+[
+'Circle', 19, 2004.01
+]
+
+//  As expected, the timestamp2 is overriden
+viewMapping | sort by assetId asc, timestamp1 asc | as viewMapping;
+viewMappingFromT1 | as viewMappingFromT1;
+viewMappingFromT2 | as viewMappingFromT2;
+rawT1;
+rawT2
+
+//  Finally, let's add a square at the bottom:
+.append rawT1 <| datatable(assetId:string, timestamp:long, measure:decimal)
+[
+'Square', 40, 27
+]
+
+//  As expected, the timestamp2 is taken from the bottom one in rawT2
+viewMapping | sort by assetId asc, timestamp1 asc | as viewMapping;
+viewMappingFromT1 | as viewMappingFromT1;
+viewMappingFromT2 | as viewMappingFromT2;
+rawT1;
+rawT2
