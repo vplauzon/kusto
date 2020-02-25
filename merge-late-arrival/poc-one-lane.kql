@@ -1,0 +1,168 @@
+//  First let's create a table representing raw data ingestion 
+//  To simplify the process, we express timestamp as integer
+//  Obviously those would be datetime in a real system
+//  Main metadata is extracted (e.g. asset id, telemetry type & timestamp)
+//  All the details of the telemetry itself is encapsulated in a dynamic
+//  The schema of that dynamic would varry between telemetry type
+.create table rawIngestion(assetId:string, telemetryType:string, timestamp:long, data:dynamic)
+
+//  Let's then create a mapping table representing the mapping between the
+//  times in two types of telemetry
+.create table redundantMapping(
+    assetId:string,
+    timestamp1:long,
+    timestamp2:long)
+
+//.drop table rawIngestion
+//.drop table redundantMapping
+
+//  Let's create a function acting as a view to the mappings with latest times
+.create function viewMapping()
+{
+    redundantMapping
+    //  Take only the maximum timestamp2
+    | summarize timestamp2=max(timestamp2) by assetId, timestamp1
+}
+
+//  Let's define a max delta for the database
+.create function viewMaxDelta()
+{
+    10
+}
+
+//  Let's create a function creating a mapping between two streams
+//  Assuming the time on the first stream must be "after" the
+//  mapped time on the second stream
+.create function extractTimeMapping(
+    T1:(assetId:string, timestamp:long),
+    T2:(assetId:string, timestamp:long),
+    maxDelta:long) {
+    let prepT1 = T1
+        | project-rename timestamp1=timestamp
+        //  Create an array of 2 values for the time keys
+        | extend timeKey=pack_array(
+            bin(timestamp1-maxDelta, maxDelta),
+            bin(timestamp1, maxDelta))
+        //  Expand that array into 2 rows
+        | mv-expand timeKey to typeof(long);
+    let prepT2 = T2
+        | project-rename timestamp2=timestamp
+        | extend timeKey=bin(timestamp2, maxDelta);
+    let mapping = prepT1
+        | join kind=leftouter prepT2 on assetId, timeKey
+        | where isnull(timestamp2) or timestamp1 > timestamp2
+        | summarize timestamp2=max(timestamp2) by assetId, timestamp1;
+    mapping
+}
+
+//  Let's create functions we'll use for update policy on mappingT1T2FromT1
+.create function updateRedundantMapping()
+{
+    let rawIngestionT1 = rawIngestion
+    | where telemetryType == "type1"
+    | project assetId, timestamp;
+    let fullRawIngestionT1 = database('mergepoc1lane').rawIngestion
+    | where telemetryType == "type1"
+    | project assetId, timestamp;
+    let rawIngestionT2 = rawIngestion
+    | where telemetryType == "type2"
+    | project assetId, timestamp;
+    let fullRawIngestionT2 = database('mergepoc1lane').rawIngestion
+    | where telemetryType == "type2"
+    | project assetId, timestamp;
+    //  Mappings within the ingestion
+    let ingestedMapping =
+        extractTimeMapping(rawIngestionT1, rawIngestionT2, viewMaxDelta);
+    //  Mappings having T1 late ingested (with corresponding T2 ingested previously)
+    let lateT1Ingestion =
+        extractTimeMapping(rawIngestionT1, fullRawIngestionT2, viewMaxDelta)
+        | where isnotnull(timestamp1) and isnotnull(timestamp2);
+    //  Mappings having T2 late ingested (with corresponding T1 ingested previously)
+    let lateT2Ingestion =
+        extractTimeMapping(fullRawIngestionT1, rawIngestionT2, viewMaxDelta)
+        | where isnotnull(timestamp1) and isnotnull(timestamp2);
+    ingestedMapping
+    | union lateT1Ingestion
+    | union lateT2Ingestion
+    | distinct assetId, timestamp1, timestamp2;
+}
+
+//.drop function viewMapping
+//.drop function viewMaxDelta
+//.drop function extractTimeMapping
+//.drop function updateRedundantMapping
+
+//  Let's attach those functions as update policies
+.alter table redundantMapping policy update
+@'[{"IsEnabled": true, "Source": "rawIngestion", "Query": "updateRedundantMapping()", "IsTransactional": true, "PropagateIngestionProperties": false}]'
+
+//  Let's now see how the ingestion will behave
+
+//  Let's start by ingesting a few simple records of type 1:
+.append rawIngestion <| datatable(assetId:string, telemetryType:string, timestamp:long, data:dynamic)
+[
+'Circle', 'type1', 10, dynamic({'measure':12.3}),
+'Circle', 'type1', 20, dynamic({'measure':12.4}),
+'Circle', 'type1', 30, dynamic({'measure':0.3}),
+'Square', 'type1', 11, dynamic({'measure':125}),
+'Square', 'type1', 21, dynamic({'measure':126.2}),
+'Square', 'type1', 31, dynamic({'measure':122})
+]
+
+//  Let's see how is that reflected in mapping tables
+//  No timestamp2 has been captured, since no ingestion happend in rawT2
+viewMapping | sort by assetId asc, timestamp1 asc | as viewMapping;
+redundantMapping | sort by assetId asc, timestamp1 asc, timestamp2 asc | as redundantMapping;
+rawIngestion | as rawIngestion;
+
+//  Now, let's ingest records of type 2
+.append rawIngestion <| datatable(assetId:string, telemetryType:string, timestamp:long, data:dynamic)
+[
+'Circle', 'type2', 12, dynamic({'measure':2003.3}),
+'Circle', 'type2', 18, dynamic({'measure':2003.9}),
+'Circle', 'type2', 28, dynamic({'measure':2004.1}),
+'Square', 'type2', 9, dynamic({'measure':432}),
+'Square', 'type2', 24, dynamic({'measure':434.2}),
+'Square', 'type2', 33, dynamic({'measure':433.89})
+]
+
+//  No we can see some timestamp2
+//  Why are 2 still null?
+//  (Circle, 10, null) because there is no (Circle, t, *) in rawT2 (where t<=10)
+//  (Square, 21, null) because, although there is a (Square, t, *) in rawT2 (where t<=21), t<21-maxDelta(10)
+viewMapping | sort by assetId asc, timestamp1 asc | as viewMapping;
+redundantMapping | sort by assetId asc, timestamp1 asc, timestamp2 asc | as redundantMapping;
+rawIngestion | as rawIngestion;
+
+//  Let's insert a type 2 circle before the first type 1:
+.append rawIngestion <| datatable(assetId:string, telemetryType:string, timestamp:long, data:dynamic)
+[
+'Circle', 'type2', 8, dynamic({'measure':2003.15})
+]
+
+//  As expected, the first circle now takes its timestamp2
+viewMapping | sort by assetId asc, timestamp1 asc | as viewMapping;
+redundantMapping | sort by assetId asc, timestamp1 asc, timestamp2 asc | as redundantMapping;
+rawIngestion | as rawIngestion;
+
+//  Let's override the mapping of circle / timestamp1=20:
+.append rawIngestion <| datatable(assetId:string, telemetryType:string, timestamp:long, data:dynamic)
+[
+'Circle', 'type2', 19, dynamic({'measure':2004.01})
+]
+
+//  As expected, the timestamp2 is overriden
+viewMapping | sort by assetId asc, timestamp1 asc | as viewMapping;
+redundantMapping | sort by assetId asc, timestamp1 asc, timestamp2 asc | as redundantMapping;
+rawIngestion | as rawIngestion;
+
+//  Finally, let's add a square at the bottom:
+.append rawIngestion <| datatable(assetId:string, telemetryType:string, timestamp:long, data:dynamic)
+[
+'Square', 'type1', 40, dynamic({'measure':27})
+]
+
+//  As expected, the timestamp2 is taken from the bottom one in type 2
+viewMapping | sort by assetId asc, timestamp1 asc | as viewMapping;
+redundantMapping | sort by assetId asc, timestamp1 asc, timestamp2 asc | as redundantMapping;
+rawIngestion | as rawIngestion;
