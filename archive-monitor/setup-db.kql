@@ -1,0 +1,133 @@
+// To do in the scope of App Insights database (via ADX proxy)
+// Should return:
+// availabilityResults
+// browserTimings
+// customEvents
+// customMetrics
+// dependencies
+// exceptions
+// pageViews
+// performanceCounters
+// requests
+// traces
+.show tables
+
+// Now from the backup database (normal ADX cluster)
+// Let's store the name of the App Insight Cluster in a function
+.create-or-alter function aiCluster() {
+   h'<URL to App Insight (AI) cluster>'
+}
+
+// Let's store the name of the App Insight backup-database in a function
+.create-or-alter function aiDatabase() {
+   h'<database name>'
+}
+
+// Now from the backup database (normal ADX cluster)
+// Let's store the name of the App Insight Cluster in a function
+.create-or-alter function aiMaxIngestionTime() {
+   let maxIngestionTime = (cluster(aiCluster()).database(aiDatabase()).availabilityResults | extend ingestionTime=ingestion_time())
+   | union (cluster(aiCluster()).database(aiDatabase()).browserTimings | extend ingestionTime=ingestion_time())
+   | union (cluster(aiCluster()).database(aiDatabase()).customEvents | extend ingestionTime=ingestion_time())
+   | union (cluster(aiCluster()).database(aiDatabase()).customMetrics | extend ingestionTime=ingestion_time())
+   | union (cluster(aiCluster()).database(aiDatabase()).dependencies | extend ingestionTime=ingestion_time())
+   | union (cluster(aiCluster()).database(aiDatabase()).exceptions | extend ingestionTime=ingestion_time())
+   | union (cluster(aiCluster()).database(aiDatabase()).pageViews | extend ingestionTime=ingestion_time())
+   | union (cluster(aiCluster()).database(aiDatabase()).performanceCounters | extend ingestionTime=ingestion_time())
+   | union (cluster(aiCluster()).database(aiDatabase()).requests | extend ingestionTime=ingestion_time())
+   | union (cluster(aiCluster()).database(aiDatabase()).traces | extend ingestionTime=ingestion_time())
+   | summarize maxIngestionTime=max(ingestionTime);
+   toscalar(maxIngestionTime)
+}
+
+// Create a bookmark table to track where we're at in Azure Monitor cluster
+// and be able to roll back in cases where the ingestion fails midway
+.create table Bookmark(
+   monitorMaxIngestionTime:datetime,
+   startIngestionTime:datetime,
+   isCompleted:bool)
+
+// Returns the "startIngestionTime" if an incomplete bookmark exists
+.create-or-alter function incompleteStartIngestionTime() {
+   toscalar(
+      Bookmark
+      | where not(isCompleted)
+      | project startIngestionTime)
+}
+
+// Returns the "monitorMaxIngestionTime" for the incomplete bookmark
+.create-or-alter function incompleteMonitorMaxIngestionTime() {
+   toscalar(
+      Bookmark
+      | where not(isCompleted)
+      | project monitorMaxIngestionTime)
+}
+
+// Returns the last archived monitor max ingestion time, i.e. where we're starting from
+.create-or-alter function lastArchivedMonitorIngestionTime() {
+   toscalar(
+      Bookmark
+      | where isCompleted
+      | project monitorMaxIngestionTime)
+}
+
+// Returns a new temporary bookmark row
+.create-or-alter function newTemporaryBookmark() {
+   print monitorMaxIngestionTime=aiMaxIngestionTime(),
+      startIngestionTime=now(),
+      isCompleted=false
+}
+
+// Returns a new permanent bookmark row
+.create-or-alter function newPermanentBookmark() {
+   Bookmark
+   | where not(isCompleted)
+   | extend isCompleted=true
+}
+
+// Returns the permanent bookmark row
+.create-or-alter function rollbackBookmark() {
+   Bookmark
+   | where isCompleted
+}
+
+// First time around, we'll create every table with the correct schema but empty
+.set-or-replace availabilityResults with (folder=@"ai") <|
+cluster(aiCluster()).database(aiDatabase()).availabilityResults
+| limit 0
+
+.set-or-replace browserTimings with (folder=@"ai") <|
+cluster(aiCluster()).database(aiDatabase()).browserTimings
+| limit 0
+
+.set-or-replace customEvents with (folder=@"ai") <|
+cluster(aiCluster()).database(aiDatabase()).customEvents
+| limit 0
+
+.set-or-replace customMetrics with (folder=@"ai") <|
+cluster(aiCluster()).database(aiDatabase()).customMetrics
+| limit 0
+
+.set-or-replace dependencies with (folder=@"ai") <|
+cluster(aiCluster()).database(aiDatabase()).dependencies
+| limit 0
+
+.set-or-replace exceptions with (folder=@"ai") <|
+cluster(aiCluster()).database(aiDatabase()).exceptions
+| limit 0
+
+.set-or-replace pageViews with (folder=@"ai") <|
+cluster(aiCluster()).database(aiDatabase()).pageViews
+| limit 0
+
+.set-or-replace performanceCounters with (folder=@"ai") <|
+cluster(aiCluster()).database(aiDatabase()).performanceCounters
+| limit 0
+
+.set-or-replace requests with (folder=@"ai") <|
+cluster(aiCluster()).database(aiDatabase()).requests
+| limit 0
+
+.set-or-replace traces with (folder=@"ai") <|
+cluster(aiCluster()).database(aiDatabase()).traces
+| limit 0
