@@ -1,0 +1,44 @@
+// For each table, let's drop the extents after temporary bookmark
+.drop extents <|
+.show table availabilityResults extents
+| where MinCreatedOn>=incompleteStartIngestionTime()
+
+.drop extents <|
+.show table browserTimings extents
+| where MinCreatedOn>=incompleteStartIngestionTime()
+
+.drop extents <|
+.show table customEvents extents
+| where MinCreatedOn>=incompleteStartIngestionTime()
+
+.drop extents <|
+.show table customMetrics extents
+| where MinCreatedOn>=incompleteStartIngestionTime()
+
+.drop extents <|
+.show table dependencies extents
+| where MinCreatedOn>=incompleteStartIngestionTime()
+
+.drop extents <|
+.show table exceptions extents
+| where MinCreatedOn>=incompleteStartIngestionTime()
+
+.drop extents <|
+.show table pageViews extents
+| where MinCreatedOn>=incompleteStartIngestionTime()
+
+.drop extents <|
+.show table performanceCounters extents
+| where MinCreatedOn>=incompleteStartIngestionTime()
+
+.drop extents <|
+.show table requests extents
+| where MinCreatedOn>=incompleteStartIngestionTime()
+
+.drop extents <|
+.show table traces extents
+| where MinCreatedOn>=incompleteStartIngestionTime()
+
+// Roll back the bookmark table
+.set-or-replace Bookmark <|
+   rollbackBookmark

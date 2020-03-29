@@ -1,0 +1,34 @@
+// Suspend merge policy in the database
+.alter database <Kusto database name> policy merge '{"AllowRebuild":false,"AllowMerge":false}'
+
+// Check if an incomplete bookmark exists
+print incompleteStartIngestionTime()
+
+// If incomplete bookmark exists
+////////////////////////////////////////////////////////////////////////////
+
+
+
+////////////////////////////////////////////////////////////////////////////
+
+// Persist a temporary bookmark
+.append Bookmark <| newTemporaryBookmark()
+
+// For each table, let's append content
+.append pageViews <|
+   let lastArchivedIngestionTime = lastArchivedMonitorIngestionTime();
+   let latestIngestionTime = incompleteMonitorMaxIngestionTime();
+   cluster(aiCluster()).database(aiDatabase()).pageViews
+   | extend ingestionTime = ingestion_time()
+   | where isnull(lastArchivedIngestionTime) or ingestionTime > lastArchivedIngestionTime
+   | where ingestionTime <= latestIngestionTime
+   | project-away ingestionTime
+
+// Do it with every table...
+
+// Update in-place bookmark table
+.set-or-replace Bookmark <|
+   newPermanentBookmark()
+
+// Resume merge policy in the database
+.alter database ailogs policy merge '{}'
