@@ -2,16 +2,24 @@
     "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
     "contentVersion": "1.0.0.0",
     "parameters": {
-        "kustoUri": {
+        "clusterId": {
             "type": "string",
             "metadata": {
-                "description": "Cluster URI"
+                "description": "Kusto cluster's resource ID"
+            }
+        },
+        "db": {
+            "type": "string",
+            "metadata": {
+                "description": "DB in Kusto cluster where to archive App Insights data"
             }
         }
     },
     "variables": {
         "Unique ID": "[uniqueString(resourceGroup().id)]",
-        "kusto connection name": "kusto-connection"
+        "kusto connection name": "kusto-connection",
+        "kusto connection api id": "[concat(subscription().id, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/kusto')]",
+        "app name": "archieve-app-insights"
     },
     "resources": [
         {
@@ -24,11 +32,92 @@
                 "customParameterValues": {
                 },
                 "api": {
-                    "id": "[concat(subscription().id, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/kusto')]"
+                    "id": "[variables('kusto connection api id')]"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "[variables('app name')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/connections', variables('kusto connection name'))]"
+            ],
+            "properties": {
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "$connections": {
+                            "defaultValue": {
+                            },
+                            "type": "Object"
+                        },
+                        "clusterUri": {
+                            "type": "String"
+                        },
+                        "db": {
+                            "type": "String"
+                        }
+                    },
+                    "triggers": {
+                        "Recurrence": {
+                            "recurrence": {
+                                "frequency": "Day",
+                                "interval": 30
+                            },
+                            "type": "Recurrence"
+                        }
+                    },
+                    "actions": {
+                        "Run_query_and_list_results": {
+                            "runAfter": {
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "body": {
+                                    "cluster": "@parameters('clusterUri')",
+                                    "csl": ".show tables",
+                                    "db": "@parameters('db')"
+                                },
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['kusto']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "path": "/ListKustoResults/false"
+                            }
+                        }
+                    },
+                    "outputs": {
+                    }
+                },
+                "parameters": {
+                    "$connections": {
+                        "value": {
+                            "kusto": {
+                                "connectionId": "[parameters('clusterId')]",
+                                "connectionName": "kusto",
+                                "id": "[variables('kusto connection api id')]"
+                            }
+                        }
+                    },
+                    "clusterUri": {
+                        "value": "[reference(parameters('clusterId'), '2019-11-09').uri]"
+                    },
+                    "db": {
+                        "value": "[parameters('db')]"
+                    }
                 }
             }
         }
     ],
     "outputs": {
+        "q": {
+            "type": "object",
+            "value": "[reference(parameters('clusterId'), '2019-11-09')]"
+        }
     }
 }
