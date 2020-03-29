@@ -4,17 +4,12 @@
 // Check if an incomplete bookmark exists
 print incompleteStartIngestionTime()
 
-// If incomplete bookmark exists
-////////////////////////////////////////////////////////////////////////////
-
-
-
-////////////////////////////////////////////////////////////////////////////
+// Assuming no incomplete bookmark exists
 
 // Persist a temporary bookmark
 .append Bookmark <| newTemporaryBookmark()
 
-// For each table, let's append content
+// For each table, let's append content ; here we show it just for pageViews
 .append pageViews <|
    let lastArchivedIngestionTime = lastArchivedMonitorIngestionTime();
    let latestIngestionTime = incompleteMonitorMaxIngestionTime();
@@ -31,4 +26,4 @@ print incompleteStartIngestionTime()
    newPermanentBookmark()
 
 // Resume merge policy in the database
-.alter database ailogs policy merge '{}'
+.alter database <Kusto database name> policy merge '{}'
