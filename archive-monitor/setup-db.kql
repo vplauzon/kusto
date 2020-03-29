@@ -15,16 +15,19 @@
 // Now from the backup database (normal ADX cluster)
 // Let's store the name of the App Insight Cluster in a function
 .create-or-alter function aiCluster() {
+   // See https://docs.microsoft.com/en-us/azure/data-explorer/query-monitor-data#connect-to-the-proxy
+   // Url should start with https://ade.applicationinsights.io or https://ade.loganalytics.io/
    h'<URL to App Insight (AI) cluster>'
 }
 
 // Let's store the name of the App Insight backup-database in a function
 .create-or-alter function aiDatabase() {
+   // Name of the Azure Monitor database:  that is the name of the Log Analytics workspace or
+   // the Application Insights service
    h'<database name>'
 }
 
-// Now from the backup database (normal ADX cluster)
-// Let's store the name of the App Insight Cluster in a function
+// Returns the App Insights maximum ingestion time
 .create-or-alter function aiMaxIngestionTime() {
    let maxIngestionTime = (cluster(aiCluster()).database(aiDatabase()).availabilityResults | extend ingestionTime=ingestion_time())
    | union (cluster(aiCluster()).database(aiDatabase()).browserTimings | extend ingestionTime=ingestion_time())
@@ -83,12 +86,6 @@
    Bookmark
    | where not(isCompleted)
    | extend isCompleted=true
-}
-
-// Returns the permanent bookmark row
-.create-or-alter function rollbackBookmark() {
-   Bookmark
-   | where isCompleted
 }
 
 // First time around, we'll create every table with the correct schema but empty
