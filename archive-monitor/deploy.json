@@ -266,10 +266,43 @@
                             },
                             "type": "Workflow"
                         },
-                        "append-content": {
+                        "for-each-table": {
+                            "actions": {
+                                "append-content": {
+                                    "inputs": {
+                                        "body": {
+                                            "csl": "@concat('.append ', item(), ' <| let lastArchivedIngestionTime = lastArchivedMonitorIngestionTime();let latestIngestionTime = incompleteMonitorMaxIngestionTime();cluster(aiCluster()).database(aiDatabase()).', item(), '   | extend ingestionTime = ingestion_time()   | where isnull(lastArchivedIngestionTime) or ingestionTime > lastArchivedIngestionTime   | where ingestionTime <= latestIngestionTime   | project-away ingestionTime')",
+                                            "isCommand": true
+                                        },
+                                        "host": {
+                                            "triggerName": "manual",
+                                            "workflow": {
+                                                "id": "[resourceId('Microsoft.Logic/workflows', variables('kusto app name'))]"
+                                            }
+                                        }
+                                    },
+                                    "runAfter": {
+                                    },
+                                    "type": "Workflow"
+                                }
+                            },
+                            "foreach": "@split('availabilityResults|browserTimings|customEvents|customMetrics|dependencies|exceptions|pageViews|performanceCounters|requests|traces', '|')",
+                            "runAfter": {
+                                "persist-temporary-bookmark": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "runtimeConfiguration": {
+                                "concurrency": {
+                                    "repetitions": 1
+                                }
+                            },
+                            "type": "Foreach"
+                        },
+                        "make-permanent-bookmark": {
                             "inputs": {
                                 "body": {
-                                    "csl": ".append pageViews <| let lastArchivedIngestionTime = lastArchivedMonitorIngestionTime();let latestIngestionTime = incompleteMonitorMaxIngestionTime();cluster(aiCluster()).database(aiDatabase()).pageViews   | extend ingestionTime = ingestion_time()   | where isnull(lastArchivedIngestionTime) or ingestionTime > lastArchivedIngestionTime   | where ingestionTime <= latestIngestionTime   | project-away ingestionTime",
+                                    "csl": ".set-or-replace Bookmark <| newPermanentBookmark()",
                                     "isCommand": true
                                 },
                                 "host": {
@@ -280,9 +313,31 @@
                                 }
                             },
                             "runAfter": {
-                                "persist-temporary-bookmark": [
+                                "for-each-table": [
                                     "Succeeded"
                                 ]
+
+                            },
+                            "type": "Workflow"
+                        },
+                        "enable-merge-policy": {
+                            "inputs": {
+                                "body": {
+                                    "csl": "@concat('.alter database ', parameters('db'), ' policy merge ''{}'' ')",
+                                    "isCommand": true
+                                },
+                                "host": {
+                                    "triggerName": "manual",
+                                    "workflow": {
+                                        "id": "[resourceId('Microsoft.Logic/workflows', variables('kusto app name'))]"
+                                    }
+                                }
+                            },
+                            "runAfter": {
+                                "make-permanent-bookmark": [
+                                    "Succeeded"
+                                ]
+
                             },
                             "type": "Workflow"
                         }
