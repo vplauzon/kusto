@@ -17,46 +17,134 @@
     },
     "variables": {
         "Unique ID": "[uniqueString(resourceGroup().id)]",
-        "kusto connection name": "kusto-connection",
-        "kusto connection api id": "[concat(subscription().id, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/kusto')]",
-        "app name": "archieve-app-insights"
+        "kusto app name": "kusto-app",
+        "archive app name": "archive-app"
     },
     "resources": [
         {
-            "type": "Microsoft.Web/connections",
-            "apiVersion": "2016-06-01",
-            "name": "[variables('kusto connection name')]",
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "[variables('kusto app name')]",
             "location": "[resourceGroup().location]",
+            "dependsOn": [
+            ],
+            "identity": {
+                "type": "SystemAssigned"
+            },
             "properties": {
-                "displayName": "[variables('kusto connection name')]",
-                "customParameterValues": {
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "clusterUri": {
+                            "type": "String"
+                        },
+                        "db": {
+                            "type": "String"
+                        }
+                    },
+                    "triggers": {
+                        "manual": {
+                            "inputs": {
+                                "schema": {
+                                    "properties": {
+                                        "csl": {
+                                            "type": "string"
+                                        },
+                                        "isCommand": {
+                                            "type": "boolean"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            },
+                            "kind": "Http",
+                            "type": "Request"
+                        }
+                    },
+                    "actions": {
+                        "invoke-kusto": {
+                            "inputs": {
+                                "authentication": {
+                                    "audience": "@parameters('clusterUri')",
+                                    "type": "ManagedServiceIdentity"
+                                },
+                                "body": {
+                                    "csl": "@triggerBody()?['csl']",
+                                    "db": "@parameters('db')",
+                                    "properties": "{\"Options\":{\"queryconsistency\":\"strongconsistency\"},\"Parameters\":{},\"ClientRequestId\":\"archive-app;42\"}"
+                                },
+                                "headers": {
+                                    "Accept-Encoding": "deflate",
+                                    "Connection": "Keep-Alive",
+                                    "Content-Type": "application/json; charset=utf-8"
+                                },
+                                "method": "POST",
+                                "retryPolicy": {
+                                    "type": "none"
+                                },
+                                "uri": "@concat(parameters('clusterUri'), if(triggerBody()?['isCommand'], '/v1/rest/mgmt', '/v2/rest/query'))"
+                            },
+                            "limit": {
+                                "timeout": "PT5S"
+                            },
+                            "runAfter": {
+                            },
+                            "type": "Http"
+                        },
+                        "success-response": {
+                            "inputs": {
+                                "body": "@body('invoke-kusto')",
+                                "statusCode": "@outputs('invoke-kusto')['statusCode']"
+                            },
+                            "kind": "http",
+                            "runAfter": {
+                                "invoke-kusto": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Response"
+                        },
+                        "failure-response": {
+                            "inputs": {
+                                "body": "@concat('Failure at Kusto:  ', triggerBody()?['invoke-kusto'])",
+                                "statusCode": "@outputs('invoke-kusto')['statusCode']"
+                            },
+                            "kind": "http",
+                            "runAfter": {
+                                "invoke-kusto": [
+                                    "Failed"
+                                ]
+                            },
+                            "type": "Response"
+                        }
+                    },
+                    "outputs": {
+                    }
                 },
-                "api": {
-                    "id": "[variables('kusto connection api id')]"
+                "parameters": {
+                    "clusterUri": {
+                        "value": "[reference(parameters('clusterId'), '2019-11-09').uri]"
+                    },
+                    "db": {
+                        "value": "[parameters('db')]"
+                    }
                 }
             }
         },
         {
             "type": "Microsoft.Logic/workflows",
             "apiVersion": "2017-07-01",
-            "name": "[variables('app name')]",
+            "name": "[variables('archive app name')]",
             "location": "[resourceGroup().location]",
             "dependsOn": [
-                "[resourceId('Microsoft.Web/connections', variables('kusto connection name'))]"
+                "[resourceId('Microsoft.Logic/workflows', variables('kusto app name'))]"
             ],
             "properties": {
                 "definition": {
                     "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
                     "contentVersion": "1.0.0.0",
                     "parameters": {
-                        "$connections": {
-                            "defaultValue": {
-                            },
-                            "type": "Object"
-                        },
-                        "clusterUri": {
-                            "type": "String"
-                        },
                         "db": {
                             "type": "String"
                         }
@@ -71,42 +159,28 @@
                         }
                     },
                     "actions": {
-                        "Run_query_and_list_results": {
-                            "runAfter": {
-                            },
-                            "type": "ApiConnection",
+                        "disable-merge-policy": {
                             "inputs": {
                                 "body": {
-                                    "cluster": "@parameters('clusterUri')",
-                                    "csl": ".show tables",
-                                    "db": "@parameters('db')"
+                                    "csl": "@concat('.alter database ', parameters('db'), ' policy merge ''{\"AllowRebuild\":false,\"AllowMerge\":false}'' ')",
+                                    "isCommand": true
                                 },
                                 "host": {
-                                    "connection": {
-                                        "name": "@parameters('$connections')['kusto']['connectionId']"
+                                    "triggerName": "manual",
+                                    "workflow": {
+                                        "id": "[resourceId('Microsoft.Logic/workflows', variables('kusto app name'))]"
                                     }
-                                },
-                                "method": "post",
-                                "path": "/ListKustoResults/false"
-                            }
+                                }
+                            },
+                            "runAfter": {
+                            },
+                            "type": "Workflow"
                         }
                     },
                     "outputs": {
                     }
                 },
                 "parameters": {
-                    "$connections": {
-                        "value": {
-                            "kusto": {
-                                "connectionId": "[parameters('clusterId')]",
-                                "connectionName": "kusto",
-                                "id": "[variables('kusto connection api id')]"
-                            }
-                        }
-                    },
-                    "clusterUri": {
-                        "value": "[reference(parameters('clusterId'), '2019-11-09').uri]"
-                    },
                     "db": {
                         "value": "[parameters('db')]"
                     }
@@ -115,7 +189,7 @@
         }
     ],
     "outputs": {
-        "q": {
+        "obj": {
             "type": "object",
             "value": "[reference(parameters('clusterId'), '2019-11-09')]"
         }
