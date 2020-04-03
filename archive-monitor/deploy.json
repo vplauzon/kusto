@@ -107,7 +107,7 @@
                         },
                         "failure-response": {
                             "inputs": {
-                                "body": "@concat('Failure at Kusto:  ', triggerBody()?['invoke-kusto'])",
+                                "body": "@concat('Failure at Kusto:  ', body('invoke-kusto'))",
                                 "statusCode": "@outputs('invoke-kusto')['statusCode']"
                             },
                             "kind": "http",
@@ -173,6 +173,116 @@
                                 }
                             },
                             "runAfter": {
+                            },
+                            "type": "Workflow"
+                        },
+                        "check-incomplete-bookmark": {
+                            "inputs": {
+                                "body": {
+                                    "csl": "print incompleteStartIngestionTime()",
+                                    "isCommand": false
+                                },
+                                "host": {
+                                    "triggerName": "manual",
+                                    "workflow": {
+                                        "id": "[resourceId('Microsoft.Logic/workflows', variables('kusto app name'))]"
+                                    }
+                                }
+                            },
+                            "runAfter": {
+                                "disable-merge-policy": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Workflow"
+                        },
+                        "primary-result-incomplete-bookmark": {
+                            "inputs": {
+                                "from": "@body('check-incomplete-bookmark')",
+                                "where": "@equals(item()?.TableKind, 'PrimaryResult')"
+                            },
+                            "runAfter": {
+                                "check-incomplete-bookmark": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Query"
+                        },
+                        "value-incomplete-bookmark": {
+                            "inputs": "@body('primary-result-incomplete-bookmark')[0].Rows[0]",
+                            "runAfter": {
+                                "primary-result-incomplete-bookmark": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose"
+                        },
+                        "if-incomplete-bookmark": {
+                            "actions": {
+                                "rollback": {
+                                    "inputs": {
+                                        "body": {
+                                            "csl": ".drop extents <| .show database ailogs extents | where MinCreatedOn>=incompleteStartIngestionTime()",
+                                            "isCommand": true
+                                        },
+                                        "host": {
+                                            "triggerName": "manual",
+                                            "workflow": {
+                                                "id": "[resourceId('Microsoft.Logic/workflows', variables('kusto app name'))]"
+                                            }
+                                        }
+                                    },
+                                    "runAfter": {
+                                    },
+                                    "type": "Workflow"
+                                }
+                            },
+                            "expression": "@not(equals(outputs('value-incomplete-bookmark'), null))",
+                            "runAfter": {
+                                "value-incomplete-bookmark": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "If"
+                        },
+                        "persist-temporary-bookmark": {
+                            "inputs": {
+                                "body": {
+                                    "csl": ".append Bookmark <| newTemporaryBookmark()",
+                                    "isCommand": true
+                                },
+                                "host": {
+                                    "triggerName": "manual",
+                                    "workflow": {
+                                        "id": "[resourceId('Microsoft.Logic/workflows', variables('kusto app name'))]"
+                                    }
+                                }
+                            },
+                            "runAfter": {
+                                "if-incomplete-bookmark": [
+                                    "Succeeded"
+                                ]
+
+                            },
+                            "type": "Workflow"
+                        },
+                        "append-content": {
+                            "inputs": {
+                                "body": {
+                                    "csl": ".append pageViews <| let lastArchivedIngestionTime = lastArchivedMonitorIngestionTime();let latestIngestionTime = incompleteMonitorMaxIngestionTime();cluster(aiCluster()).database(aiDatabase()).pageViews   | extend ingestionTime = ingestion_time()   | where isnull(lastArchivedIngestionTime) or ingestionTime > lastArchivedIngestionTime   | where ingestionTime <= latestIngestionTime   | project-away ingestionTime",
+                                    "isCommand": true
+                                },
+                                "host": {
+                                    "triggerName": "manual",
+                                    "workflow": {
+                                        "id": "[resourceId('Microsoft.Logic/workflows', variables('kusto app name'))]"
+                                    }
+                                }
+                            },
+                            "runAfter": {
+                                "persist-temporary-bookmark": [
+                                    "Succeeded"
+                                ]
                             },
                             "type": "Workflow"
                         }
