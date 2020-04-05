@@ -1,0 +1,295 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "clusterId": {
+            "type": "string",
+            "metadata": {
+                "description": "Kusto cluster's resource ID"
+            }
+        }
+    },
+    "variables": {
+        "kusto cluster app name": "kusto-cluster-app",
+        "start app name": "test-start-app",
+        "stop app name": "test-stop-app"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "[variables('kusto cluster app name')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+            ],
+            "identity": {
+                "type": "SystemAssigned"
+            },
+            "properties": {
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                    },
+                    "triggers": {
+                        "manual": {
+                            "inputs": {
+                                "schema": {
+                                    "properties": {
+                                        "clusterId": {
+                                            "type": "string"
+                                        },
+                                        "command": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            },
+                            "kind": "Http",
+                            "type": "Request"
+                        }
+                    },
+                    "actions": {
+                        "initalize-state": {
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "state",
+                                        "type": "string"
+                                    }
+                                ]
+                            },
+                            "runAfter": {
+                            },
+                            "type": "InitializeVariable"
+                        },
+                        "until-not-transitioning": {
+                            "actions": {
+                                "if-waiting": {
+                                    "actions": {
+                                        "Delay": {
+                                            "inputs": {
+                                                "interval": {
+                                                    "count": 30,
+                                                    "unit": "Second"
+                                                }
+                                            },
+                                            "runAfter": {
+                                            },
+                                            "type": "Wait"
+                                        }
+                                    },
+                                    "expression": "@not(equals(variables('state'), ''))",
+                                    "runAfter": {
+                                    },
+                                    "type": "If"
+                                },
+                                "get-command": {
+                                    "inputs": {
+                                        "authentication": {
+                                            "audience": "https://management.azure.com/",
+                                            "type": "ManagedServiceIdentity"
+                                        },
+                                        "method": "GET",
+                                        "uri": "@{concat('https://management.azure.com', triggerBody()?['clusterId'], '?api-version=2019-01-21')}"
+                                    },
+                                    "runAfter": {
+                                        "if-waiting": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Http"
+                                },
+                                "set-state": {
+                                    "inputs": {
+                                        "name": "state",
+                                        "value": "@{body('get-command')}.properties.state"
+                                    },
+                                    "runAfter": {
+                                        "get-command": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "SetVariable"
+                                }
+                            },
+                            "expression": "@or(contains(variables('state'), 'ing'), equals(variables('state'), ''))",
+                            "limit": {
+                                "count": 120,
+                                "timeout": "PT1H"
+                            },
+                            "runAfter": {
+                                "initalize-state": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Until"
+                        },
+                        "execute-command": {
+                            "inputs": {
+                                "authentication": {
+                                    "audience": "https://management.azure.com/",
+                                    "type": "ManagedServiceIdentity"
+                                },
+                                "method": "POST",
+                                "uri": "@{concat('https://management.azure.com', triggerBody()?['clusterId'], '/', if(equals(triggerBody()?['command'], 'start'), 'start', 'stop'), '?api-version=2019-01-21')}"
+                            },
+                            "runAfter": {
+                                "until-not-transitioning": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Http"
+                        },
+                        "response": {
+                            "inputs": {
+                                "statusCode": 200
+                            },
+                            "kind": "http",
+                            "operationOptions": "Asynchronous",
+                            "runAfter": {
+                                "execute-command": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Response"
+                        }
+                    },
+                    "outputs": {
+                    }
+                },
+                "parameters": {
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "[variables('start app name')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Logic/workflows', variables('kusto cluster app name'))]"
+            ],
+            "properties": {
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "clusterId": {
+                            "type": "String"
+                        }
+                    },
+                    "triggers": {
+                        "manual": {
+                            "inputs": {
+                                "method": "GET",
+                                "schema": {
+                                    "properties": {
+                                    },
+                                    "type": "object"
+                                }
+                            },
+                            "kind": "Http",
+                            "type": "Request"
+                        }
+                    },
+                    "actions": {
+                        "start-cluster": {
+                            "inputs": {
+                                "body": {
+                                    "clusterId": "@parameters('clusterId')",
+                                    "command": "start"
+                                },
+                                "host": {
+                                    "triggerName": "manual",
+                                    "workflow": {
+                                        "id": "[resourceId('Microsoft.Logic/workflows', variables('kusto cluster app name'))]"
+                                    }
+                                },
+                                "retryPolicy": {
+                                    "type": "none"
+                                }
+                            },
+                            "runAfter": {
+                            },
+                            "type": "Workflow"
+                        }
+                    },
+                    "outputs": {
+                    }
+                },
+                "parameters": {
+                    "clusterId": {
+                        "value": "[parameters('clusterId')]"
+                    }
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "[variables('stop app name')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Logic/workflows', variables('kusto cluster app name'))]"
+            ],
+            "properties": {
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "clusterId": {
+                            "type": "String"
+                        }
+                    },
+                    "triggers": {
+                        "manual": {
+                            "inputs": {
+                                "method": "GET",
+                                "schema": {
+                                    "properties": {
+                                    },
+                                    "type": "object"
+                                }
+                            },
+                            "kind": "Http",
+                            "type": "Request"
+                        }
+                    },
+                    "actions": {
+                        "stop-cluster": {
+                            "inputs": {
+                                "body": {
+                                    "clusterId": "@parameters('clusterId')",
+                                    "command": "stop"
+                                },
+                                "host": {
+                                    "triggerName": "manual",
+                                    "workflow": {
+                                        "id": "[resourceId('Microsoft.Logic/workflows', variables('kusto cluster app name'))]"
+                                    }
+                                },
+                                "retryPolicy": {
+                                    "type": "none"
+                                }
+                            },
+                            "runAfter": {
+                            },
+                            "type": "Workflow"
+                        }
+                    },
+                    "outputs": {
+                    }
+                },
+                "parameters": {
+                    "clusterId": {
+                        "value": "[parameters('clusterId')]"
+                    }
+                }
+            }
+        }
+    ],
+    "outputs": {
+    }
+}

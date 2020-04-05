@@ -48,13 +48,13 @@
 .create table Bookmark(
    monitorMaxIngestionTime:datetime,
    startIngestionTime:datetime,
-   isCompleted:bool)
+   recordCount:long)
 
 // Returns the "startIngestionTime" if an incomplete bookmark exists
 .create-or-alter function incompleteStartIngestionTime() {
    toscalar(
       Bookmark
-      | where not(isCompleted)
+      | where isnull(recordCount)
       | project startIngestionTime)
 }
 
@@ -62,7 +62,7 @@
 .create-or-alter function incompleteMonitorMaxIngestionTime() {
    toscalar(
       Bookmark
-      | where not(isCompleted)
+      | where isnull(recordCount)
       | project monitorMaxIngestionTime)
 }
 
@@ -70,22 +70,23 @@
 .create-or-alter function lastArchivedMonitorIngestionTime() {
    toscalar(
       Bookmark
-      | where isCompleted
-      | project monitorMaxIngestionTime)
+      | where isnotnull(recordCount)
+      | summarize max(monitorMaxIngestionTime))
 }
 
 // Returns a new temporary bookmark row
 .create-or-alter function newTemporaryBookmark() {
    print monitorMaxIngestionTime=aiMaxIngestionTime(),
       startIngestionTime=now(),
-      isCompleted=false
+      recordCount=long(null)
 }
 
-// Returns a new permanent bookmark row
-.create-or-alter function newPermanentBookmark() {
-   Bookmark
-   | where not(isCompleted)
-   | extend isCompleted=true
+// Returns the new permanent bookmarks
+.create-or-alter function newPermanentBookmark(batchRecordCount:long) {
+    Bookmark
+    | where isnull(recordCount)
+    | extend recordCount=batchRecordCount
+    | union (Bookmark | where isnotnull(recordCount))
 }
 
 // First time around, we'll create every table with the correct schema but empty

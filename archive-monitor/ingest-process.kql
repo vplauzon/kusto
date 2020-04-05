@@ -21,9 +21,15 @@ print incompleteStartIngestionTime()
 
 // Do it with every table...
 
+// Compute record count
+.show database <Kusto database name> extents
+| where MinCreatedOn>=incompleteStartIngestionTime()
+// Substracting one, which is the bookmark record
+| summarize RecordCount=max(RowCount)-1
+
 // Update in-place bookmark table
 .set-or-replace Bookmark <|
-   newPermanentBookmark()
+   newPermanentBookmark(<recourd count value from the last query>)
 
 // Resume merge policy in the database
 .alter database <Kusto database name> policy merge '{}'

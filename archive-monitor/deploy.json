@@ -16,7 +16,6 @@
         }
     },
     "variables": {
-        "Unique ID": "[uniqueString(resourceGroup().id)]",
         "kusto app name": "kusto-app",
         "archive app name": "archive-app"
     },
@@ -92,18 +91,64 @@
                             },
                             "type": "Http"
                         },
-                        "success-response": {
-                            "inputs": {
-                                "body": "@body('invoke-kusto')",
-                                "statusCode": "@outputs('invoke-kusto')['statusCode']"
+                        "is-command": {
+                            "actions": {
+                                "command-success-response": {
+                                    "inputs": {
+                                        "body": {
+                                            "primary": {
+                                                "rows": "@body('invoke-kusto').Tables[0].Rows",
+                                                "columns": "@body('invoke-kusto').Tables[0].Columns"
+                                            },
+                                            "full": "@body('invoke-kusto')"
+                                        },
+                                        "statusCode": "@outputs('invoke-kusto')['statusCode']"
+                                    },
+                                    "kind": "http",
+                                    "runAfter": {
+                                    },
+                                    "type": "Response"
+                                }
                             },
-                            "kind": "http",
+                            "else": {
+                                "actions": {
+                                    "primary-result": {
+                                        "inputs": {
+                                            "from": "@body('invoke-kusto')",
+                                            "where": "@equals(item()?.TableKind, 'PrimaryResult')"
+                                        },
+                                        "runAfter": {
+                                        },
+                                        "type": "Query"
+                                    },
+                                    "query-success-response": {
+                                        "inputs": {
+                                            "body": {
+                                                "primary": {
+                                                    "rows": "@body('primary-result')[0].Rows",
+                                                    "columns": "@body('primary-result')[0].Columns"
+                                                },
+                                                "full": "@body('invoke-kusto')"
+                                            },
+                                            "statusCode": "@outputs('invoke-kusto')['statusCode']"
+                                        },
+                                        "kind": "http",
+                                        "runAfter": {
+                                            "primary-result": [
+                                                "Succeeded"
+                                            ]
+                                        },
+                                        "type": "Response"
+                                    }
+                                }
+                            },
+                            "expression": "@triggerBody()?['isCommand']",
                             "runAfter": {
                                 "invoke-kusto": [
                                     "Succeeded"
                                 ]
                             },
-                            "type": "Response"
+                            "type": "If"
                         },
                         "failure-response": {
                             "inputs": {
@@ -196,27 +241,6 @@
                             },
                             "type": "Workflow"
                         },
-                        "primary-result-incomplete-bookmark": {
-                            "inputs": {
-                                "from": "@body('check-incomplete-bookmark')",
-                                "where": "@equals(item()?.TableKind, 'PrimaryResult')"
-                            },
-                            "runAfter": {
-                                "check-incomplete-bookmark": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Query"
-                        },
-                        "value-incomplete-bookmark": {
-                            "inputs": "@body('primary-result-incomplete-bookmark')[0].Rows[0]",
-                            "runAfter": {
-                                "primary-result-incomplete-bookmark": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Compose"
-                        },
                         "if-incomplete-bookmark": {
                             "actions": {
                                 "rollback": {
@@ -237,9 +261,9 @@
                                     "type": "Workflow"
                                 }
                             },
-                            "expression": "@not(equals(outputs('value-incomplete-bookmark'), null))",
+                            "expression": "@not(equals(body('check-incomplete-bookmark').primary.rows[0][0], null))",
                             "runAfter": {
-                                "value-incomplete-bookmark": [
+                                "check-incomplete-bookmark": [
                                     "Succeeded"
                                 ]
                             },
@@ -299,10 +323,10 @@
                             },
                             "type": "Foreach"
                         },
-                        "make-permanent-bookmark": {
+                        "compute-record-count": {
                             "inputs": {
                                 "body": {
-                                    "csl": ".set-or-replace Bookmark <| newPermanentBookmark()",
+                                    "csl": "@concat('.show database ', parameters('db'), ' extents| where MinCreatedOn>=incompleteStartIngestionTime()| summarize RecordCount=max(RowCount)-1')",
                                     "isCommand": true
                                 },
                                 "host": {
@@ -314,6 +338,27 @@
                             },
                             "runAfter": {
                                 "for-each-table": [
+                                    "Succeeded"
+                                ]
+
+                            },
+                            "type": "Workflow"
+                        },
+                        "make-permanent-bookmark": {
+                            "inputs": {
+                                "body": {
+                                    "csl": "@concat('.set-or-replace Bookmark <| newPermanentBookmark(', body('compute-record-count').primary.rows[0][0], ')')",
+                                    "isCommand": true
+                                },
+                                "host": {
+                                    "triggerName": "manual",
+                                    "workflow": {
+                                        "id": "[resourceId('Microsoft.Logic/workflows', variables('kusto app name'))]"
+                                    }
+                                }
+                            },
+                            "runAfter": {
+                                "compute-record-count": [
                                     "Succeeded"
                                 ]
 
