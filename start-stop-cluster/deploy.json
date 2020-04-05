@@ -51,81 +51,6 @@
                         }
                     },
                     "actions": {
-                        "initalize-state": {
-                            "inputs": {
-                                "variables": [
-                                    {
-                                        "name": "state",
-                                        "type": "string"
-                                    }
-                                ]
-                            },
-                            "runAfter": {
-                            },
-                            "type": "InitializeVariable"
-                        },
-                        "until-not-transitioning": {
-                            "actions": {
-                                "if-waiting": {
-                                    "actions": {
-                                        "Delay": {
-                                            "inputs": {
-                                                "interval": {
-                                                    "count": 30,
-                                                    "unit": "Second"
-                                                }
-                                            },
-                                            "runAfter": {
-                                            },
-                                            "type": "Wait"
-                                        }
-                                    },
-                                    "expression": "@not(equals(variables('state'), ''))",
-                                    "runAfter": {
-                                    },
-                                    "type": "If"
-                                },
-                                "get-command": {
-                                    "inputs": {
-                                        "authentication": {
-                                            "audience": "https://management.azure.com/",
-                                            "type": "ManagedServiceIdentity"
-                                        },
-                                        "method": "GET",
-                                        "uri": "@{concat('https://management.azure.com', triggerBody()?['clusterId'], '?api-version=2019-01-21')}"
-                                    },
-                                    "runAfter": {
-                                        "if-waiting": [
-                                            "Succeeded"
-                                        ]
-                                    },
-                                    "type": "Http"
-                                },
-                                "set-state": {
-                                    "inputs": {
-                                        "name": "state",
-                                        "value": "@{body('get-command')}.properties.state"
-                                    },
-                                    "runAfter": {
-                                        "get-command": [
-                                            "Succeeded"
-                                        ]
-                                    },
-                                    "type": "SetVariable"
-                                }
-                            },
-                            "expression": "@or(contains(variables('state'), 'ing'), equals(variables('state'), ''))",
-                            "limit": {
-                                "count": 120,
-                                "timeout": "PT1H"
-                            },
-                            "runAfter": {
-                                "initalize-state": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Until"
-                        },
                         "execute-command": {
                             "inputs": {
                                 "authentication": {
@@ -136,9 +61,6 @@
                                 "uri": "@{concat('https://management.azure.com', triggerBody()?['clusterId'], '/', if(equals(triggerBody()?['command'], 'start'), 'start', 'stop'), '?api-version=2019-01-21')}"
                             },
                             "runAfter": {
-                                "until-not-transitioning": [
-                                    "Succeeded"
-                                ]
                             },
                             "type": "Http"
                         },
