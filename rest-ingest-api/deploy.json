@@ -1,0 +1,351 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+    },
+    "variables": {
+        "Unique ID": "[uniqueString(concat(resourceGroup().id, 'ingest-blob'))]",
+        "Logic App Name": "[concat('ingest-blobs-', variables('Unique ID'))]"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "[variables('Logic App Name')]",
+            "location": "[resourceGroup().location]",
+            "identity": {
+                "type": "SystemAssigned"
+            },
+            "properties": {
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "defaultDataManagementUri": {
+                            "defaultValue": "##DEFINE A DEFAULT VALUE##",
+                            "type": "String"
+                        }
+                    },
+                    "triggers": {
+                        "manual": {
+                            "type": "Request",
+                            "kind": "Http",
+                            "inputs": {
+                                "schema": {
+                                    "properties": {
+                                        "blobs": {
+                                            "items": {
+                                                "properties": {
+                                                    "additionalProperties": {
+                                                        "type": "object"
+                                                    },
+                                                    "blobUri": {
+                                                        "type": "string"
+                                                    },
+                                                    "rawDataSize": {
+                                                        "type": "integer"
+                                                    }
+                                                },
+                                                "required": [
+                                                    "blobUri"
+                                                ],
+                                                "type": "object"
+                                            },
+                                            "type": "array"
+                                        },
+                                        "dataManagementUri": {
+                                            "type": "string"
+                                        },
+                                        "database": {
+                                            "type": "string"
+                                        },
+                                        "flushImmediately": {
+                                            "type": "boolean"
+                                        },
+                                        "table": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "database",
+                                        "table"
+                                    ],
+                                    "type": "object"
+                                }
+                            },
+                            "operationOptions": "EnableSchemaValidation"
+                        }
+                    },
+                    "actions": {
+                        "data-management-uri": {
+                            "runAfter": {},
+                            "type": "Compose",
+                            "inputs": "@coalesce(triggerBody()?['dataManagementUri'], parameters('defaultDataManagementUri'))"
+                        },
+                        "failed-queue": {
+                            "runAfter": {
+                                "failed-queue-array": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose",
+                            "inputs": "@body('failed-queue-array')[0][1]"
+                        },
+                        "failed-queue-array": {
+                            "runAfter": {
+                                "get-resources-rows": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Query",
+                            "inputs": {
+                                "from": "@outputs('get-resources-rows')",
+                                "where": "@equals(item()[0], 'FailedIngestionsQueue')"
+                            }
+                        },
+                        "get-kusto-identity-token": {
+                            "runAfter": {
+                                "failed-queue": [
+                                    "Succeeded"
+                                ],
+                                "ready-queue": [
+                                    "Succeeded"
+                                ],
+                                "successful-queue": [
+                                    "Succeeded"
+                                ],
+                                "temp-storage": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Http",
+                            "inputs": {
+                                "authentication": {
+                                    "audience": "@outputs('data-management-uri')",
+                                    "type": "ManagedServiceIdentity"
+                                },
+                                "body": {
+                                    "csl": ".get kusto identity token"
+                                },
+                                "method": "POST",
+                                "uri": "@{concat(outputs('data-management-uri'), '/v1/rest/mgmt')}"
+                            }
+                        },
+                        "get-resources": {
+                            "runAfter": {
+                                "data-management-uri": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Http",
+                            "inputs": {
+                                "authentication": {
+                                    "audience": "@outputs('data-management-uri')",
+                                    "type": "ManagedServiceIdentity"
+                                },
+                                "body": {
+                                    "csl": ".get ingestion resources"
+                                },
+                                "method": "POST",
+                                "uri": "@{concat(outputs('data-management-uri'), '/v1/rest/mgmt')}"
+                            }
+                        },
+                        "get-resources-rows": {
+                            "runAfter": {
+                                "get-resources": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose",
+                            "inputs": "@body('get-resources').Tables[0].Rows"
+                        },
+                        "kusto-identity-token": {
+                            "runAfter": {
+                                "get-kusto-identity-token": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose",
+                            "inputs": "@body('get-kusto-identity-token').Tables[0].Rows[0][0]"
+                        },
+                        "loop-blobs": {
+                            "foreach": "@triggerBody()?['blobs']",
+                            "actions": {
+                                "add-flush-messages": {
+                                    "runAfter": {
+                                        "ingestion-message": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Compose",
+                                    "inputs": "@if(equals(triggerBody()?['flushImmediately'], null), outputs('ingestion-message'), addProperty(outputs('ingestion-message'), 'FlushImmediately', triggerBody()?['flushImmediately']))"
+                                },
+                                "add-raw-data-size": {
+                                    "runAfter": {
+                                        "add-flush-messages": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Compose",
+                                    "inputs": "@if(equals(triggerBody()?['rawDataSize'], null), outputs('add-flush-messages'), addProperty(outputs('add-flush-messages'), 'RawDataSize', triggerBody()?['rawDataSize']))"
+                                },
+                                "additional-properties": {
+                                    "runAfter": {
+                                        "ingestion-id": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Compose",
+                                    "inputs": "@addProperty(coalesce(items('loop-blobs').additionalProperties, json('{}')), 'authorizationContext', outputs('kusto-identity-token'))"
+                                },
+                                "ingestion-id": {
+                                    "runAfter": {},
+                                    "type": "Compose",
+                                    "inputs": "@guid()"
+                                },
+                                "ingestion-message": {
+                                    "runAfter": {
+                                        "additional-properties": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Compose",
+                                    "inputs": {
+                                        "AdditionalProperties": "@outputs('additional-properties')",
+                                        "BlobPath": "@{items('loop-blobs').blobUri}",
+                                        "DatabaseName": "@{triggerBody()?['database']}",
+                                        "Id": "@{outputs('ingestion-id')}",
+                                        "ReportLevel": 2,
+                                        "ReportMethod": 0,
+                                        "RetainBlobOnSuccess": true,
+                                        "TableName": "@{triggerBody()?['table']}"
+                                    }
+                                },
+                                "post-message-to-queue": {
+                                    "runAfter": {
+                                        "add-raw-data-size": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Http",
+                                    "inputs": {
+                                        "body": "<QueueMessage><MessageText>@{base64(string(outputs('add-raw-data-size')))}</MessageText></QueueMessage>",
+                                        "headers": {
+                                            "x-ms-client-request-id": "@{guid()}",
+                                            "x-ms-version": "2019-02-02"
+                                        },
+                                        "method": "POST",
+                                        "uri": "@{outputs('put-message-url')}"
+                                    }
+                                }
+                            },
+                            "runAfter": {
+                                "put-message-url": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Foreach",
+                            "runtimeConfiguration": {
+                                "concurrency": {
+                                    "repetitions": 50
+                                }
+                            }
+                        },
+                        "put-message-url": {
+                            "runAfter": {
+                                "kusto-identity-token": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose",
+                            "inputs": "@concat(split(outputs('ready-queue'), '?')[0], '/messages?', split(outputs('ready-queue'), '?')[1], '&api-version=2019-02-02')"
+                        },
+                        "ready-queue": {
+                            "runAfter": {
+                                "ready-queue-array": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose",
+                            "inputs": "@body('ready-queue-array')[0][1]"
+                        },
+                        "ready-queue-array": {
+                            "runAfter": {
+                                "get-resources-rows": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Query",
+                            "inputs": {
+                                "from": "@outputs('get-resources-rows')",
+                                "where": "@equals(item()[0], 'SecuredReadyForAggregationQueue')"
+                            }
+                        },
+                        "response-success": {
+                            "runAfter": {
+                                "loop-blobs": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Response",
+                            "kind": "Http",
+                            "inputs": {
+                                "body": {
+                                    "blobCount": "@length(triggerBody()?['blobs'])"
+                                },
+                                "statusCode": 200
+                            },
+                            "operationOptions": "Asynchronous"
+                        },
+                        "successful-queue": {
+                            "runAfter": {
+                                "successful-queue-array": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose",
+                            "inputs": "@body('successful-queue-array')[0][1]"
+                        },
+                        "successful-queue-array": {
+                            "runAfter": {
+                                "get-resources-rows": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Query",
+                            "inputs": {
+                                "from": "@outputs('get-resources-rows')",
+                                "where": "@equals(item()[0], 'SuccessfulIngestionsQueue')"
+                            }
+                        },
+                        "temp-storage": {
+                            "runAfter": {
+                                "temp-storage-array": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose",
+                            "inputs": "@body('temp-storage-array')[0][1]"
+                        },
+                        "temp-storage-array": {
+                            "runAfter": {
+                                "get-resources-rows": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Query",
+                            "inputs": {
+                                "from": "@outputs('get-resources-rows')",
+                                "where": "@equals(item()[0], 'TempStorage')"
+                            }
+                        }
+                    },
+                    "outputs": {}
+                },
+                "parameters": {}
+            }
+        }
+    ],
+    "outputs": {
+    }
+}
