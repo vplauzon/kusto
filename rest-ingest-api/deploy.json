@@ -68,7 +68,8 @@
                                     },
                                     "required": [
                                         "database",
-                                        "table"
+                                        "table",
+                                        "blobs"
                                     ],
                                     "type": "object"
                                 }
