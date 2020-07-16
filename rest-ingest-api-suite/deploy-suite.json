@@ -65,6 +65,35 @@
                             "type": "Compose",
                             "inputs": "@coalesce(triggerBody()?['dataManagementUri'], parameters('defaultDataManagementUri'))"
                         },
+                        "get-kusto-identity-token": {
+                            "runAfter": {
+                                "data-management-uri": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Http",
+                            "inputs": {
+                                "authentication": {
+                                    "audience": "@outputs('data-management-uri')",
+                                    "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Identity Name'))]",
+                                    "type": "ManagedServiceIdentity"
+                                },
+                                "body": {
+                                    "csl": ".get kusto identity token"
+                                },
+                                "method": "POST",
+                                "uri": "@{concat(outputs('data-management-uri'), '/v1/rest/mgmt')}"
+                            }
+                        },
+                        "kusto-identity-token": {
+                            "runAfter": {
+                                "get-kusto-identity-token": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose",
+                            "inputs": "@body('get-kusto-identity-token').Tables[0].Rows[0][0]"
+                        },
                         "failed-queue": {
                             "runAfter": {
                                 "failed-queue-array": [
@@ -149,6 +178,9 @@
                                 ],
                                 "temp-storage": [
                                     "Succeeded"
+                                ],
+                                "kusto-identity-token": [
+                                    "Succeeded"
                                 ]
                             },
                             "type": "Response",
@@ -158,7 +190,8 @@
                                     "failedQueue": "@outputs('failed-queue')",
                                     "readyQueue": "@outputs('ready-queue')",
                                     "successfulQueue": "@outputs('successful-queue')",
-                                    "tempStorage": "@outputs('temp-storage')"
+                                    "tempStorage": "@outputs('temp-storage')",
+                                    "identityToken": "@outputs('kusto-identity-token')"
                                 },
                                 "statusCode": 200
                             },
@@ -363,6 +396,15 @@
                                 "uri": "@{concat(outputs('data-management-uri'), '/v1/rest/mgmt')}"
                             }
                         },
+                        "kusto-identity-token": {
+                            "runAfter": {
+                                "get-kusto-identity-token": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose",
+                            "inputs": "@body('get-kusto-identity-token').Tables[0].Rows[0][0]"
+                        },
                         "get-resources": {
                             "runAfter": {
                                 "data-management-uri": [
@@ -391,15 +433,6 @@
                             },
                             "type": "Compose",
                             "inputs": "@body('get-resources').Tables[0].Rows"
-                        },
-                        "kusto-identity-token": {
-                            "runAfter": {
-                                "get-kusto-identity-token": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Compose",
-                            "inputs": "@body('get-kusto-identity-token').Tables[0].Rows[0][0]"
                         },
                         "loop-blobs": {
                             "foreach": "@triggerBody()?['blobs']",
