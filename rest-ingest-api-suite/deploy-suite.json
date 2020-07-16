@@ -346,93 +346,14 @@
                             },
                             "type": "Workflow"
                         },
-                        "failed-queue": {
+                        "put-message-url": {
                             "runAfter": {
-                                "failed-queue-array": [
+                                "get-kusto-resources": [
                                     "Succeeded"
                                 ]
                             },
                             "type": "Compose",
-                            "inputs": "@body('failed-queue-array')[0][1]"
-                        },
-                        "failed-queue-array": {
-                            "runAfter": {
-                                "get-resources-rows": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Query",
-                            "inputs": {
-                                "from": "@outputs('get-resources-rows')",
-                                "where": "@equals(item()[0], 'FailedIngestionsQueue')"
-                            }
-                        },
-                        "get-kusto-identity-token": {
-                            "runAfter": {
-                                "failed-queue": [
-                                    "Succeeded"
-                                ],
-                                "ready-queue": [
-                                    "Succeeded"
-                                ],
-                                "successful-queue": [
-                                    "Succeeded"
-                                ],
-                                "temp-storage": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Http",
-                            "inputs": {
-                                "authentication": {
-                                    "audience": "@outputs('data-management-uri')",
-                                    "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Identity Name'))]",
-                                    "type": "ManagedServiceIdentity"
-                                },
-                                "body": {
-                                    "csl": ".get kusto identity token"
-                                },
-                                "method": "POST",
-                                "uri": "@{concat(outputs('data-management-uri'), '/v1/rest/mgmt')}"
-                            }
-                        },
-                        "kusto-identity-token": {
-                            "runAfter": {
-                                "get-kusto-identity-token": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Compose",
-                            "inputs": "@body('get-kusto-identity-token').Tables[0].Rows[0][0]"
-                        },
-                        "get-resources": {
-                            "runAfter": {
-                                "data-management-uri": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Http",
-                            "inputs": {
-                                "authentication": {
-                                    "audience": "@outputs('data-management-uri')",
-                                    "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Identity Name'))]",
-                                    "type": "ManagedServiceIdentity"
-                                },
-                                "body": {
-                                    "csl": ".get ingestion resources"
-                                },
-                                "method": "POST",
-                                "uri": "@{concat(outputs('data-management-uri'), '/v1/rest/mgmt')}"
-                            }
-                        },
-                        "get-resources-rows": {
-                            "runAfter": {
-                                "get-resources": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Compose",
-                            "inputs": "@body('get-resources').Tables[0].Rows"
+                            "inputs": "@concat(split(body('get-kusto-resources').readyQueue, '?')[0], '/messages?', split(body('get-kusto-resources').readyQueue, '?')[1], '&api-version=2019-02-02')"
                         },
                         "loop-blobs": {
                             "foreach": "@triggerBody()?['blobs']",
@@ -462,7 +383,7 @@
                                         ]
                                     },
                                     "type": "Compose",
-                                    "inputs": "@addProperty(coalesce(items('loop-blobs').additionalProperties, json('{}')), 'authorizationContext', outputs('kusto-identity-token'))"
+                                    "inputs": "@addProperty(coalesce(items('loop-blobs').additionalProperties, json('{}')), 'authorizationContext', body('get-kusto-resources').identityToken)"
                                 },
                                 "ingestion-id": {
                                     "runAfter": {},
@@ -517,36 +438,6 @@
                                 }
                             }
                         },
-                        "put-message-url": {
-                            "runAfter": {
-                                "kusto-identity-token": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Compose",
-                            "inputs": "@concat(split(outputs('ready-queue'), '?')[0], '/messages?', split(outputs('ready-queue'), '?')[1], '&api-version=2019-02-02')"
-                        },
-                        "ready-queue": {
-                            "runAfter": {
-                                "ready-queue-array": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Compose",
-                            "inputs": "@body('ready-queue-array')[0][1]"
-                        },
-                        "ready-queue-array": {
-                            "runAfter": {
-                                "get-resources-rows": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Query",
-                            "inputs": {
-                                "from": "@outputs('get-resources-rows')",
-                                "where": "@equals(item()[0], 'SecuredReadyForAggregationQueue')"
-                            }
-                        },
                         "response-success": {
                             "runAfter": {
                                 "loop-blobs": [
@@ -562,48 +453,6 @@
                                 "statusCode": 200
                             },
                             "operationOptions": "Asynchronous"
-                        },
-                        "successful-queue": {
-                            "runAfter": {
-                                "successful-queue-array": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Compose",
-                            "inputs": "@body('successful-queue-array')[0][1]"
-                        },
-                        "successful-queue-array": {
-                            "runAfter": {
-                                "get-resources-rows": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Query",
-                            "inputs": {
-                                "from": "@outputs('get-resources-rows')",
-                                "where": "@equals(item()[0], 'SuccessfulIngestionsQueue')"
-                            }
-                        },
-                        "temp-storage": {
-                            "runAfter": {
-                                "temp-storage-array": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Compose",
-                            "inputs": "@body('temp-storage-array')[0][1]"
-                        },
-                        "temp-storage-array": {
-                            "runAfter": {
-                                "get-resources-rows": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Query",
-                            "inputs": {
-                                "from": "@outputs('get-resources-rows')",
-                                "where": "@equals(item()[0], 'TempStorage')"
-                            }
                         }
                     },
                     "outputs": {}
