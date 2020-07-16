@@ -123,20 +123,11 @@
                                 }
                             },
                             "runAfter": {
-                                "data-management-uri": [
+                                "get-resources": [
                                     "Succeeded"
                                 ]
                             },
                             "type": "Select"
-                        },
-                        "failed-queue": {
-                            "runAfter": {
-                                "failed-queue-array": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Compose",
-                            "inputs": "@body('failed-queue-array')[0][1]"
                         },
                         "failed-queue-array": {
                             "runAfter": {
@@ -146,18 +137,21 @@
                             },
                             "type": "Query",
                             "inputs": {
-                                "from": "@outputs('transform-resources-rows')",
+                                "from": "@body('transform-resources-rows')",
                                 "where": "@equals(item().type, 'FailedIngestionsQueue')"
                             }
                         },
-                        "ready-queue": {
+                        "failed-queues": {
                             "runAfter": {
-                                "ready-queue-array": [
+                                "failed-queue-array": [
                                     "Succeeded"
                                 ]
                             },
-                            "type": "Compose",
-                            "inputs": "@body('ready-queue-array')[0][1]"
+                            "type": "Select",
+                            "inputs": {
+                                "from": "@body('failed-queue-array')",
+                                "select": "@item().value"
+                            }
                         },
                         "ready-queue-array": {
                             "runAfter": {
@@ -167,22 +161,82 @@
                             },
                             "type": "Query",
                             "inputs": {
-                                "from": "@outputs('transform-resources-rows')",
+                                "from": "@body('transform-resources-rows')",
                                 "where": "@equals(item().type, 'SecuredReadyForAggregationQueue')"
+                            }
+                        },
+                        "ready-queues": {
+                            "runAfter": {
+                                "ready-queue-array": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Select",
+                            "inputs": {
+                                "from": "@body('ready-queue-array')",
+                                "select": "@item().value"
+                            }
+                        },
+                        "successful-queue-array": {
+                            "runAfter": {
+                                "transform-resources-rows": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Query",
+                            "inputs": {
+                                "from": "@body('transform-resources-rows')",
+                                "where": "@equals(item().type, 'SuccessfulIngestionsQueue')"
+                            }
+                        },
+                        "successful-queues": {
+                            "runAfter": {
+                                "successful-queue-array": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Select",
+                            "inputs": {
+                                "from": "@body('successful-queue-array')",
+                                "select": "@item().value"
+                            }
+                        },
+                        "temp-storage-array": {
+                            "runAfter": {
+                                "transform-resources-rows": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Query",
+                            "inputs": {
+                                "from": "@body('transform-resources-rows')",
+                                "where": "@equals(item().type, 'TempStorage')"
+                            }
+                        },
+                        "temp-storages": {
+                            "runAfter": {
+                                "temp-storage-array": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Select",
+                            "inputs": {
+                                "from": "@body('temp-storage-array')",
+                                "select": "@item().value"
                             }
                         },
                         "response-success": {
                             "runAfter": {
-                                "failed-queue": [
+                                "failed-queues": [
                                     "Succeeded"
                                 ],
-                                "ready-queue": [
+                                "ready-queues": [
                                     "Succeeded"
                                 ],
-                                "successful-queue": [
+                                "successful-queues": [
                                     "Succeeded"
                                 ],
-                                "temp-storage": [
+                                "temp-storages": [
                                     "Succeeded"
                                 ],
                                 "kusto-identity-token": [
@@ -193,57 +247,15 @@
                             "kind": "Http",
                             "inputs": {
                                 "body": {
-                                    "failedQueue": "@outputs('failed-queue')",
-                                    "readyQueue": "@outputs('ready-queue')",
-                                    "successfulQueue": "@outputs('successful-queue')",
-                                    "tempStorage": "@outputs('temp-storage')",
+                                    "failedQueue": "@outputs('failed-queues')",
+                                    "readyQueue": "@outputs('ready-queues')",
+                                    "successfulQueue": "@outputs('successful-queues')",
+                                    "tempStorage": "@outputs('temp-storages')",
                                     "identityToken": "@outputs('kusto-identity-token')"
                                 },
                                 "statusCode": 200
                             },
                             "operationOptions": "Asynchronous"
-                        },
-                        "successful-queue": {
-                            "runAfter": {
-                                "successful-queue-array": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Compose",
-                            "inputs": "@body('successful-queue-array')[0][1]"
-                        },
-                        "successful-queue-array": {
-                            "runAfter": {
-                                "transform-resources-rows": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Query",
-                            "inputs": {
-                                "from": "@outputs('transform-resources-rows')",
-                                "where": "@equals(item().type, 'SuccessfulIngestionsQueue')"
-                            }
-                        },
-                        "temp-storage": {
-                            "runAfter": {
-                                "temp-storage-array": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Compose",
-                            "inputs": "@body('temp-storage-array')[0][1]"
-                        },
-                        "temp-storage-array": {
-                            "runAfter": {
-                                "transform-resources-rows": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Query",
-                            "inputs": {
-                                "from": "@outputs('transform-resources-rows')",
-                                "where": "@equals(item().type, 'TempStorage')"
-                            }
                         }
                     },
                     "outputs": {}
