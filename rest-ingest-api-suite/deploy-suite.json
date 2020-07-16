@@ -47,43 +47,11 @@
                             "inputs": {
                                 "schema": {
                                     "properties": {
-                                        "blobs": {
-                                            "items": {
-                                                "properties": {
-                                                    "additionalProperties": {
-                                                        "type": "object"
-                                                    },
-                                                    "blobUri": {
-                                                        "type": "string"
-                                                    },
-                                                    "rawDataSize": {
-                                                        "type": "integer"
-                                                    }
-                                                },
-                                                "required": [
-                                                    "blobUri"
-                                                ],
-                                                "type": "object"
-                                            },
-                                            "type": "array"
-                                        },
                                         "dataManagementUri": {
-                                            "type": "string"
-                                        },
-                                        "database": {
-                                            "type": "string"
-                                        },
-                                        "flushImmediately": {
-                                            "type": "boolean"
-                                        },
-                                        "table": {
                                             "type": "string"
                                         }
                                     },
                                     "required": [
-                                        "database",
-                                        "table",
-                                        "blobs"
                                     ],
                                     "type": "object"
                                 }
@@ -187,7 +155,10 @@
                             "kind": "Http",
                             "inputs": {
                                 "body": {
-                                    "blobCount": "@length(triggerBody()?['blobs'])"
+                                    "failedQueue": "@outputs('failed-queue')",
+                                    "readyQueue": "@outputs('ready-queue')",
+                                    "successfulQueue": "@outputs('successful-queue')",
+                                    "tempStorage": "@outputs('temp-storage')"
                                 },
                                 "statusCode": 200
                             },

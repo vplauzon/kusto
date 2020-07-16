@@ -14,5 +14,5 @@ echo "Resource group:  $rg"
 echo
 echo "Deploying ARM template"
 
-az group deployment create -n "deploy-$(uuidgen)" -g $rg \
+az deployment group create -n "deploy-$(uuidgen)" -g $rg \
     --template-file deploy-suite.json
