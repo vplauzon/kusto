@@ -274,11 +274,11 @@
                             "kind": "Http",
                             "inputs": {
                                 "body": {
-                                    "failedQueue": "@outputs('failed-queues')",
-                                    "readyQueue": "@outputs('ready-queues')",
-                                    "successfulQueue": "@outputs('successful-queues')",
-                                    "tempStorage": "@outputs('temp-storages')",
-                                    "statusTables": "@outputs('status-tables')",
+                                    "failedQueues": "@body('failed-queues')",
+                                    "readyQueues": "@body('ready-queues')",
+                                    "successfulQueues": "@body('successful-queues')",
+                                    "tempStorages": "@body('temp-storages')",
+                                    "statusTables": "@body('status-tables')",
                                     "identityToken": "@outputs('kusto-identity-token')"
                                 },
                                 "statusCode": 200
@@ -399,7 +399,7 @@
                                 ]
                             },
                             "type": "Compose",
-                            "inputs": "@concat(split(body('get-kusto-resources').readyQueue, '?')[0], '/messages?', split(body('get-kusto-resources').readyQueue, '?')[1], '&api-version=2019-02-02')"
+                            "inputs": "@concat(split(body('get-kusto-resources').readyQueues[0], '?')[0], '/messages?', split(body('get-kusto-resources').readyQueues[0], '?')[1], '&api-version=2019-02-02')"
                         },
                         "loop-blobs": {
                             "foreach": "@triggerBody()?['blobs']",
