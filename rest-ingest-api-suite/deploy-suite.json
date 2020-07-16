@@ -225,6 +225,30 @@
                                 "select": "@item().value"
                             }
                         },
+                        "status-tables-array": {
+                            "runAfter": {
+                                "transform-resources-rows": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Query",
+                            "inputs": {
+                                "from": "@body('transform-resources-rows')",
+                                "where": "@equals(item().type, 'IngestionsStatusTable')"
+                            }
+                        },
+                        "status-tables": {
+                            "runAfter": {
+                                "status-tables-array": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Select",
+                            "inputs": {
+                                "from": "@body('status-tables-array')",
+                                "select": "@item().value"
+                            }
+                        },
                         "response-success": {
                             "runAfter": {
                                 "failed-queues": [
@@ -239,6 +263,9 @@
                                 "temp-storages": [
                                     "Succeeded"
                                 ],
+                                "status-tables": [
+                                    "Succeeded"
+                                ],
                                 "kusto-identity-token": [
                                     "Succeeded"
                                 ]
@@ -251,6 +278,7 @@
                                     "readyQueue": "@outputs('ready-queues')",
                                     "successfulQueue": "@outputs('successful-queues')",
                                     "tempStorage": "@outputs('temp-storages')",
+                                    "statusTables": "@outputs('status-tables')",
                                     "identityToken": "@outputs('kusto-identity-token')"
                                 },
                                 "statusCode": 200
