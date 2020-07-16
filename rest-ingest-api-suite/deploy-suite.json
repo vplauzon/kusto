@@ -218,7 +218,8 @@
             "name": "[variables('Ingest Blobs Name')]",
             "location": "[resourceGroup().location]",
             "dependsOn": [
-                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Identity Name'))]"
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Identity Name'))]",
+                "[resourceId('Microsoft.Logic/workflows', variables('Get Kusto Resources Name'))]"
             ],
             "identity": {
                 "type": "UserAssigned",
@@ -292,6 +293,25 @@
                             "runAfter": {},
                             "type": "Compose",
                             "inputs": "@coalesce(triggerBody()?['dataManagementUri'], parameters('defaultDataManagementUri'))"
+                        },
+                        "get-kusto-resources": {
+                            "inputs": {
+                                "body": {
+                                    "dataManagementUri": "@{outputs('data-management-uri')}"
+                                },
+                                "host": {
+                                    "triggerName": "manual",
+                                    "workflow": {
+                                        "id": "[resourceId('Microsoft.Logic/workflows', variables('Get Kusto Resources Name'))]"
+                                    }
+                                }
+                            },
+                            "runAfter": {
+                                "data-management-uri": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Workflow"
                         },
                         "failed-queue": {
                             "runAfter": {
