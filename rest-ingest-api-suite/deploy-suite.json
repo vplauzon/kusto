@@ -6,7 +6,8 @@
     "variables": {
         "Unique ID": "[uniqueString(concat(resourceGroup().id, 'ingest-blob'))]",
         "Identity Name": "[concat('kusto-access-identity-', variables('Unique ID'))]",
-        "Logic App Name": "[concat('ingest-blobs-', variables('Unique ID'))]"
+        "Get Kusto Resources Name": "[concat('get-kusto-resources-', variables('Unique ID'))]",
+        "Ingest Blobs Name": "[concat('ingest-blobs-', variables('Unique ID'))]"
     },
     "resources": [
         {
@@ -18,7 +19,232 @@
         {
             "type": "Microsoft.Logic/workflows",
             "apiVersion": "2017-07-01",
-            "name": "[variables('Logic App Name')]",
+            "name": "[variables('Get Kusto Resources Name')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Identity Name'))]"
+            ],
+            "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": {
+                    "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Identity Name'))]": {}
+                }
+            },
+            "properties": {
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "defaultDataManagementUri": {
+                            "defaultValue": "##DEFINE A DEFAULT VALUE##",
+                            "type": "String"
+                        }
+                    },
+                    "triggers": {
+                        "manual": {
+                            "type": "Request",
+                            "kind": "Http",
+                            "inputs": {
+                                "schema": {
+                                    "properties": {
+                                        "blobs": {
+                                            "items": {
+                                                "properties": {
+                                                    "additionalProperties": {
+                                                        "type": "object"
+                                                    },
+                                                    "blobUri": {
+                                                        "type": "string"
+                                                    },
+                                                    "rawDataSize": {
+                                                        "type": "integer"
+                                                    }
+                                                },
+                                                "required": [
+                                                    "blobUri"
+                                                ],
+                                                "type": "object"
+                                            },
+                                            "type": "array"
+                                        },
+                                        "dataManagementUri": {
+                                            "type": "string"
+                                        },
+                                        "database": {
+                                            "type": "string"
+                                        },
+                                        "flushImmediately": {
+                                            "type": "boolean"
+                                        },
+                                        "table": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "database",
+                                        "table",
+                                        "blobs"
+                                    ],
+                                    "type": "object"
+                                }
+                            },
+                            "operationOptions": "EnableSchemaValidation"
+                        }
+                    },
+                    "actions": {
+                        "data-management-uri": {
+                            "runAfter": {},
+                            "type": "Compose",
+                            "inputs": "@coalesce(triggerBody()?['dataManagementUri'], parameters('defaultDataManagementUri'))"
+                        },
+                        "failed-queue": {
+                            "runAfter": {
+                                "failed-queue-array": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose",
+                            "inputs": "@body('failed-queue-array')[0][1]"
+                        },
+                        "failed-queue-array": {
+                            "runAfter": {
+                                "get-resources-rows": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Query",
+                            "inputs": {
+                                "from": "@outputs('get-resources-rows')",
+                                "where": "@equals(item()[0], 'FailedIngestionsQueue')"
+                            }
+                        },
+                        "get-resources": {
+                            "runAfter": {
+                                "data-management-uri": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Http",
+                            "inputs": {
+                                "authentication": {
+                                    "audience": "@outputs('data-management-uri')",
+                                    "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Identity Name'))]",
+                                    "type": "ManagedServiceIdentity"
+                                },
+                                "body": {
+                                    "csl": ".get ingestion resources"
+                                },
+                                "method": "POST",
+                                "uri": "@{concat(outputs('data-management-uri'), '/v1/rest/mgmt')}"
+                            }
+                        },
+                        "get-resources-rows": {
+                            "runAfter": {
+                                "get-resources": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose",
+                            "inputs": "@body('get-resources').Tables[0].Rows"
+                        },
+                        "ready-queue": {
+                            "runAfter": {
+                                "ready-queue-array": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose",
+                            "inputs": "@body('ready-queue-array')[0][1]"
+                        },
+                        "ready-queue-array": {
+                            "runAfter": {
+                                "get-resources-rows": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Query",
+                            "inputs": {
+                                "from": "@outputs('get-resources-rows')",
+                                "where": "@equals(item()[0], 'SecuredReadyForAggregationQueue')"
+                            }
+                        },
+                        "response-success": {
+                            "runAfter": {
+                                "failed-queue": [
+                                    "Succeeded"
+                                ],
+                                "ready-queue": [
+                                    "Succeeded"
+                                ],
+                                "successful-queue": [
+                                    "Succeeded"
+                                ],
+                                "temp-storage": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Response",
+                            "kind": "Http",
+                            "inputs": {
+                                "body": {
+                                    "blobCount": "@length(triggerBody()?['blobs'])"
+                                },
+                                "statusCode": 200
+                            },
+                            "operationOptions": "Asynchronous"
+                        },
+                        "successful-queue": {
+                            "runAfter": {
+                                "successful-queue-array": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose",
+                            "inputs": "@body('successful-queue-array')[0][1]"
+                        },
+                        "successful-queue-array": {
+                            "runAfter": {
+                                "get-resources-rows": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Query",
+                            "inputs": {
+                                "from": "@outputs('get-resources-rows')",
+                                "where": "@equals(item()[0], 'SuccessfulIngestionsQueue')"
+                            }
+                        },
+                        "temp-storage": {
+                            "runAfter": {
+                                "temp-storage-array": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose",
+                            "inputs": "@body('temp-storage-array')[0][1]"
+                        },
+                        "temp-storage-array": {
+                            "runAfter": {
+                                "get-resources-rows": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Query",
+                            "inputs": {
+                                "from": "@outputs('get-resources-rows')",
+                                "where": "@equals(item()[0], 'TempStorage')"
+                            }
+                        }
+                    },
+                    "outputs": {}
+                },
+                "parameters": {}
+            }
+        },
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "[variables('Ingest Blobs Name')]",
             "location": "[resourceGroup().location]",
             "dependsOn": [
                 "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Identity Name'))]"
