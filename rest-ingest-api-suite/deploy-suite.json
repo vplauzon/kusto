@@ -94,27 +94,6 @@
                             "type": "Compose",
                             "inputs": "@body('get-kusto-identity-token').Tables[0].Rows[0][0]"
                         },
-                        "failed-queue": {
-                            "runAfter": {
-                                "failed-queue-array": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Compose",
-                            "inputs": "@body('failed-queue-array')[0][1]"
-                        },
-                        "failed-queue-array": {
-                            "runAfter": {
-                                "get-resources-rows": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Query",
-                            "inputs": {
-                                "from": "@outputs('get-resources-rows')",
-                                "where": "@equals(item()[0], 'FailedIngestionsQueue')"
-                            }
-                        },
                         "get-resources": {
                             "runAfter": {
                                 "data-management-uri": [
@@ -135,14 +114,41 @@
                                 "uri": "@{concat(outputs('data-management-uri'), '/v1/rest/mgmt')}"
                             }
                         },
-                        "get-resources-rows": {
+                        "transform-resources-rows": {
+                            "inputs": {
+                                "from": "@body('get-resources').Tables[0].Rows",
+                                "select": {
+                                    "type": "@item()[0]",
+                                    "value": "@item()[1]"
+                                }
+                            },
                             "runAfter": {
-                                "get-resources": [
+                                "data-management-uri": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Select"
+                        },
+                        "failed-queue": {
+                            "runAfter": {
+                                "failed-queue-array": [
                                     "Succeeded"
                                 ]
                             },
                             "type": "Compose",
-                            "inputs": "@body('get-resources').Tables[0].Rows"
+                            "inputs": "@body('failed-queue-array')[0][1]"
+                        },
+                        "failed-queue-array": {
+                            "runAfter": {
+                                "transform-resources-rows": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Query",
+                            "inputs": {
+                                "from": "@outputs('transform-resources-rows')",
+                                "where": "@equals(item().type, 'FailedIngestionsQueue')"
+                            }
                         },
                         "ready-queue": {
                             "runAfter": {
@@ -155,14 +161,14 @@
                         },
                         "ready-queue-array": {
                             "runAfter": {
-                                "get-resources-rows": [
+                                "transform-resources-rows": [
                                     "Succeeded"
                                 ]
                             },
                             "type": "Query",
                             "inputs": {
-                                "from": "@outputs('get-resources-rows')",
-                                "where": "@equals(item()[0], 'SecuredReadyForAggregationQueue')"
+                                "from": "@outputs('transform-resources-rows')",
+                                "where": "@equals(item().type, 'SecuredReadyForAggregationQueue')"
                             }
                         },
                         "response-success": {
@@ -208,14 +214,14 @@
                         },
                         "successful-queue-array": {
                             "runAfter": {
-                                "get-resources-rows": [
+                                "transform-resources-rows": [
                                     "Succeeded"
                                 ]
                             },
                             "type": "Query",
                             "inputs": {
-                                "from": "@outputs('get-resources-rows')",
-                                "where": "@equals(item()[0], 'SuccessfulIngestionsQueue')"
+                                "from": "@outputs('transform-resources-rows')",
+                                "where": "@equals(item().type, 'SuccessfulIngestionsQueue')"
                             }
                         },
                         "temp-storage": {
@@ -229,14 +235,14 @@
                         },
                         "temp-storage-array": {
                             "runAfter": {
-                                "get-resources-rows": [
+                                "transform-resources-rows": [
                                     "Succeeded"
                                 ]
                             },
                             "type": "Query",
                             "inputs": {
-                                "from": "@outputs('get-resources-rows')",
-                                "where": "@equals(item()[0], 'TempStorage')"
+                                "from": "@outputs('transform-resources-rows')",
+                                "where": "@equals(item().type, 'TempStorage')"
                             }
                         }
                     },
