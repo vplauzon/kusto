@@ -4,7 +4,8 @@
   "variables": {
     "Unique ID": "[uniqueString(concat(resourceGroup().id, 'adls-acl-api'))]",
     "Data Lake Identity Name": "[concat('data-lake-identity-', variables('Unique ID'))]",
-    "List Blobs Name": "[concat('list-blobs-api-', variables('Unique ID'))]"
+    "List Blobs Name": "[concat('list-blobs-api-', variables('Unique ID'))]",
+    "Ingest Directory Name": "[concat('ingest-directory-api-', variables('Unique ID'))]"
   },
   "resources": [
     {
@@ -308,6 +309,65 @@
               "inputs": "@if(equals('', coalesce(triggerBody()?['directory'], '')), outputs('base-url'), concat(outputs('base-url'), '&directory=', encodeUriComponent(triggerBody()?['directory'])))"
             }
           },
+          "outputs": {}
+        },
+        "parameters": {}
+      }
+    },
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2017-07-01",
+      "name": "[variables('List Blobs Name')]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Data Lake Identity Name'))]",
+        "[resourceId('Microsoft.Logic/workflows', variables('List Blobs Name'))]"
+      ],
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Data Lake Identity Name'))]": {}
+        }
+      },
+      "properties": {
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": {},
+          "triggers": {
+            "manual": {
+              "type": "Request",
+              "kind": "Http",
+              "inputs": {
+                "schema": {
+                  "properties": {
+                    "container": {
+                      "type": "string"
+                    },
+                    "directory": {
+                      "type": "string"
+                    },
+                    "doListDirectories": {
+                      "type": "boolean"
+                    },
+                    "storageAccount": {
+                      "type": "string"
+                    },
+                    "suffix": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "storageAccount",
+                    "container"
+                  ],
+                  "type": "object"
+                }
+              },
+              "operationOptions": "EnableSchemaValidation"
+            }
+          },
+          "actions": {},
           "outputs": {}
         },
         "parameters": {}
