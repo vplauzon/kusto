@@ -1,383 +1,540 @@
 {
-  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-  "contentVersion": "1.0.0.0",
-  "variables": {
-    "Unique ID": "[uniqueString(concat(resourceGroup().id, 'adls-acl-api'))]",
-    "Data Lake Identity Name": "[concat('data-lake-identity-', variables('Unique ID'))]",
-    "List Blobs Name": "[concat('list-blobs-api-', variables('Unique ID'))]",
-    "Ingest Directory Name": "[concat('ingest-directory-api-', variables('Unique ID'))]"
-  },
-  "resources": [
-    {
-      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
-      "name": "[variables('Data Lake Identity Name')]",
-      "apiVersion": "2018-11-30",
-      "location": "[resourceGroup().location]"
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "variables": {
+        "Unique ID": "[uniqueString(concat(resourceGroup().id, 'adls-acl-api'))]",
+        "Ingest Identity Name": "[concat('ingest-identity-', variables('Unique ID'))]",
+        "List Blobs Name": "[concat('list-blobs-api-', variables('Unique ID'))]",
+        "Kusto API Name": "[concat('kusto-api-', variables('Unique ID'))]",
+        "Ingest Directory Name": "[concat('ingest-directory-api-', variables('Unique ID'))]"
     },
-    {
-      "type": "Microsoft.Logic/workflows",
-      "apiVersion": "2017-07-01",
-      "name": "[variables('List Blobs Name')]",
-      "location": "[resourceGroup().location]",
-      "dependsOn": [
-        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Data Lake Identity Name'))]"
-      ],
-      "identity": {
-        "type": "UserAssigned",
-        "userAssignedIdentities": {
-          "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Data Lake Identity Name'))]": {}
-        }
-      },
-      "properties": {
-        "definition": {
-          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
-          "contentVersion": "1.0.0.0",
-          "parameters": {},
-          "triggers": {
-            "manual": {
-              "type": "Request",
-              "kind": "Http",
-              "inputs": {
-                "schema": {
-                  "properties": {
-                    "container": {
-                      "type": "string"
-                    },
-                    "directory": {
-                      "type": "string"
-                    },
-                    "doListDirectories": {
-                      "type": "boolean"
-                    },
-                    "storageAccount": {
-                      "type": "string"
-                    },
-                    "suffix": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "storageAccount",
-                    "container"
-                  ],
-                  "type": "object"
+    "resources": [
+        {
+            "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+            "name": "[variables('Ingest Identity Name')]",
+            "apiVersion": "2018-11-30",
+            "location": "[resourceGroup().location]"
+        },
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "[variables('List Blobs Name')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Ingest Identity Name'))]"
+            ],
+            "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": {
+                    "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Ingest Identity Name'))]": {}
                 }
-              },
-              "operationOptions": "EnableSchemaValidation"
-            }
-          },
-          "actions": {
-            "base-url": {
-              "runAfter": {
-                "init-continuation": [
-                  "Succeeded"
-                ],
-                "init-error": [
-                  "Succeeded"
-                ],
-                "init-paths": [
-                  "Succeeded"
-                ]
-              },
-              "type": "Compose",
-              "inputs": "https://@{triggerBody()['storageAccount']}.dfs.core.windows.net/@{triggerBody()['container']}?resource=filesystem&recursive=true"
             },
-            "blobs": {
-              "runAfter": {
-                "until-continuation": [
-                  "Succeeded"
-                ]
-              },
-              "type": "Query",
-              "inputs": {
-                "from": "@variables('paths')",
-                "where": "@not(equals(item()?['isDirectory'], 'true'))"
-              }
-            },
-            "if-list-directories": {
-              "actions": {
-                "directories": {
-                  "runAfter": {},
-                  "type": "Query",
-                  "inputs": {
-                    "from": "@variables('paths')",
-                    "where": "@equals(item()?['isDirectory'], 'true')"
-                  }
-                },
-                "response-success-with-directories": {
-                  "runAfter": {
-                    "directories": [
-                      "Succeeded"
-                    ]
-                  },
-                  "type": "Response",
-                  "kind": "Http",
-                  "inputs": {
-                    "body": {
-                      "blobs": "@body('blobs')",
-                      "directories": "@body('directories')"
+            "properties": {
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {},
+                    "triggers": {
+                        "manual": {
+                            "type": "Request",
+                            "kind": "Http",
+                            "inputs": {
+                                "schema": {
+                                    "properties": {
+                                        "container": {
+                                            "type": "string"
+                                        },
+                                        "directory": {
+                                            "type": "string"
+                                        },
+                                        "doListDirectories": {
+                                            "type": "boolean"
+                                        },
+                                        "storageAccount": {
+                                            "type": "string"
+                                        },
+                                        "suffix": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "storageAccount",
+                                        "container"
+                                    ],
+                                    "type": "object"
+                                }
+                            },
+                            "operationOptions": "EnableSchemaValidation"
+                        }
                     },
-                    "statusCode": 200
-                  }
-                }
-              },
-              "runAfter": {
-                "blobs": [
-                  "Succeeded"
-                ]
-              },
-              "else": {
-                "actions": {
-                  "response-success-without-directories": {
-                    "runAfter": {},
-                    "type": "Response",
-                    "kind": "Http",
-                    "inputs": {
-                      "body": {
-                        "blobs": "@body('blobs')"
-                      },
-                      "statusCode": 200
-                    }
-                  }
-                }
-              },
-              "expression": "@triggerBody()?['doListDirectories']",
-              "type": "If"
-            },
-            "init-continuation": {
-              "runAfter": {},
-              "type": "InitializeVariable",
-              "inputs": {
-                "variables": [
-                  {
-                    "name": "continuation",
-                    "type": "string"
-                  }
-                ]
-              }
-            },
-            "init-error": {
-              "runAfter": {},
-              "type": "InitializeVariable",
-              "inputs": {
-                "variables": [
-                  {
-                    "name": "error",
-                    "type": "object"
-                  }
-                ]
-              }
-            },
-            "init-paths": {
-              "runAfter": {},
-              "type": "InitializeVariable",
-              "inputs": {
-                "variables": [
-                  {
-                    "name": "paths",
-                    "type": "array"
-                  }
-                ]
-              }
-            },
-            "response-failure": {
-              "runAfter": {
-                "until-continuation": [
-                  "Failed",
-                  "TimedOut"
-                ]
-              },
-              "type": "Response",
-              "kind": "Http",
-              "inputs": {
-                "body": "@variables('error')",
-                "statusCode": 500
-              }
-            },
-            "until-continuation": {
-              "actions": {
-                "data-lake-list": {
-                  "runAfter": {
-                    "with-continuation": [
-                      "Succeeded"
-                    ]
-                  },
-                  "type": "Http",
-                  "inputs": {
-                    "authentication": {
-                      "audience": "https://storage.azure.com",
-                      "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Data Lake Identity Name'))]",
-                      "type": "ManagedServiceIdentity"
-                    },
-                    "headers": {
-                      "x-ms-version": "2019-07-07"
-                    },
-                    "method": "GET",
-                    "uri": "@{outputs('with-continuation')}"
-                  }
-                },
-                "set-continuation": {
-                  "runAfter": {
-                    "data-lake-list": [
-                      "Succeeded"
-                    ]
-                  },
-                  "type": "SetVariable",
-                  "inputs": {
-                    "name": "continuation",
-                    "value": "@{outputs('data-lake-list')['headers']?['x-ms-continuation']}"
-                  }
-                },
-                "set-http-error": {
-                  "inputs": {
-                    "name": "error",
-                    "value": {
-                      "innerError": {
-                        "body": "@body('data-lake-list')",
-                        "code": "@outputs('data-lake-list')['statusCode']",
-                        "headers": "@outputs('data-lake-list')['headers']"
-                      }
-                    }
-                  },
-                  "runAfter": {
-                    "data-lake-list": [
-                      "Failed",
-                      "TimedOut"
-                    ]
+                    "actions": {
+                        "base-url": {
+                            "runAfter": {
+                                "init-continuation": [
+                                    "Succeeded"
+                                ],
+                                "init-error": [
+                                    "Succeeded"
+                                ],
+                                "init-paths": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose",
+                            "inputs": "https://@{triggerBody()['storageAccount']}.dfs.core.windows.net/@{triggerBody()['container']}?resource=filesystem&recursive=true"
+                        },
+                        "blobs": {
+                            "runAfter": {
+                                "until-continuation": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Query",
+                            "inputs": {
+                                "from": "@variables('paths')",
+                                "where": "@not(equals(item()?['isDirectory'], 'true'))"
+                            }
+                        },
+                        "if-list-directories": {
+                            "actions": {
+                                "directories": {
+                                    "runAfter": {},
+                                    "type": "Query",
+                                    "inputs": {
+                                        "from": "@variables('paths')",
+                                        "where": "@equals(item()?['isDirectory'], 'true')"
+                                    }
+                                },
+                                "response-success-with-directories": {
+                                    "runAfter": {
+                                        "directories": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Response",
+                                    "kind": "Http",
+                                    "inputs": {
+                                        "body": {
+                                            "blobs": "@body('blobs')",
+                                            "directories": "@body('directories')"
+                                        },
+                                        "statusCode": 200
+                                    }
+                                }
+                            },
+                            "runAfter": {
+                                "blobs": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "else": {
+                                "actions": {
+                                    "response-success-without-directories": {
+                                        "runAfter": {},
+                                        "type": "Response",
+                                        "kind": "Http",
+                                        "inputs": {
+                                            "body": {
+                                                "blobs": "@body('blobs')"
+                                            },
+                                            "statusCode": 200
+                                        }
+                                    }
+                                }
+                            },
+                            "expression": "@triggerBody()?['doListDirectories']",
+                            "type": "If"
+                        },
+                        "init-continuation": {
+                            "runAfter": {},
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "continuation",
+                                        "type": "string"
+                                    }
+                                ]
+                            }
+                        },
+                        "init-error": {
+                            "runAfter": {},
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "error",
+                                        "type": "object"
+                                    }
+                                ]
+                            }
+                        },
+                        "init-paths": {
+                            "runAfter": {},
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "paths",
+                                        "type": "array"
+                                    }
+                                ]
+                            }
+                        },
+                        "response-failure": {
+                            "runAfter": {
+                                "until-continuation": [
+                                    "Failed",
+                                    "TimedOut"
+                                ]
+                            },
+                            "type": "Response",
+                            "kind": "Http",
+                            "inputs": {
+                                "body": "@variables('error')",
+                                "statusCode": 500
+                            }
+                        },
+                        "until-continuation": {
+                            "actions": {
+                                "data-lake-list": {
+                                    "runAfter": {
+                                        "with-continuation": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Http",
+                                    "inputs": {
+                                        "authentication": {
+                                            "audience": "https://storage.azure.com",
+                                            "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Ingest Identity Name'))]",
+                                            "type": "ManagedServiceIdentity"
+                                        },
+                                        "headers": {
+                                            "x-ms-version": "2019-07-07"
+                                        },
+                                        "method": "GET",
+                                        "uri": "@{outputs('with-continuation')}"
+                                    }
+                                },
+                                "set-continuation": {
+                                    "runAfter": {
+                                        "data-lake-list": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "SetVariable",
+                                    "inputs": {
+                                        "name": "continuation",
+                                        "value": "@{outputs('data-lake-list')['headers']?['x-ms-continuation']}"
+                                    }
+                                },
+                                "set-http-error": {
+                                    "inputs": {
+                                        "name": "error",
+                                        "value": {
+                                            "innerError": {
+                                                "body": "@body('data-lake-list')",
+                                                "code": "@outputs('data-lake-list')['statusCode']",
+                                                "headers": "@outputs('data-lake-list')['headers']"
+                                            }
+                                        }
+                                    },
+                                    "runAfter": {
+                                        "data-lake-list": [
+                                            "Failed",
+                                            "TimedOut"
+                                        ]
 
-                  },
-                  "type": "SetVariable"
+                                    },
+                                    "type": "SetVariable"
+                                },
+                                "set-paths": {
+                                    "runAfter": {
+                                        "union-paths": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "SetVariable",
+                                    "inputs": {
+                                        "name": "paths",
+                                        "value": "@outputs('union-paths')"
+                                    }
+                                },
+                                "filter-suffix": {
+                                    "inputs": {
+                                        "from": "@body('data-lake-list').paths",
+                                        "where": "@or(equals(item()?['isDirectory'], 'true'), endswith(item().name, coalesce(triggerBody()?['suffix'], '')))"
+                                    },
+                                    "runAfter": {
+                                        "set-continuation": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Query"
+                                },
+                                "union-paths": {
+                                    "inputs": "@union(variables('paths'), body('filter-suffix'))",
+                                    "runAfter": {
+                                        "filter-suffix": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Compose"
+                                },
+                                "with-continuation": {
+                                    "runAfter": {},
+                                    "type": "Compose",
+                                    "inputs": "@concat(outputs('with-directory'), if(equals('', variables('continuation')), '', concat('&continuation=', encodeUriComponent(variables('continuation')))))"
+                                }
+                            },
+                            "runAfter": {
+                                "with-directory": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "expression": "@equals(variables('continuation'), '')",
+                            "limit": {
+                                "count": 60,
+                                "timeout": "PT1H"
+                            },
+                            "type": "Until"
+                        },
+                        "with-directory": {
+                            "runAfter": {
+                                "base-url": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose",
+                            "inputs": "@if(equals('', coalesce(triggerBody()?['directory'], '')), outputs('base-url'), concat(outputs('base-url'), '&directory=', encodeUriComponent(triggerBody()?['directory'])))"
+                        }
+                    },
+                    "outputs": {}
                 },
-                "set-paths": {
-                  "runAfter": {
-                    "union-paths": [
-                      "Succeeded"
-                    ]
-                  },
-                  "type": "SetVariable",
-                  "inputs": {
-                    "name": "paths",
-                    "value": "@outputs('union-paths')"
-                  }
-                },
-                "filter-suffix": {
-                  "inputs": {
-                    "from": "@body('data-lake-list').paths",
-                    "where": "@or(equals(item()?['isDirectory'], 'true'), endswith(item().name, coalesce(triggerBody()?['suffix'], '')))"
-                  },
-                  "runAfter": {
-                    "set-continuation": [
-                      "Succeeded"
-                    ]
-                  },
-                  "type": "Query"
-                },
-                "union-paths": {
-                  "inputs": "@union(variables('paths'), body('filter-suffix'))",
-                  "runAfter": {
-                    "filter-suffix": [
-                      "Succeeded"
-                    ]
-                  },
-                  "type": "Compose"
-                },
-                "with-continuation": {
-                  "runAfter": {},
-                  "type": "Compose",
-                  "inputs": "@concat(outputs('with-directory'), if(equals('', variables('continuation')), '', concat('&continuation=', encodeUriComponent(variables('continuation')))))"
+                "parameters": {}
+            }
+        },
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "[variables('Kusto API Name')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Ingest Identity Name'))]"
+            ],
+            "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": {
+                    "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Ingest Identity Name'))]": {}
                 }
-              },
-              "runAfter": {
-                "with-directory": [
-                  "Succeeded"
-                ]
-              },
-              "expression": "@equals(variables('continuation'), '')",
-              "limit": {
-                "count": 60,
-                "timeout": "PT1H"
-              },
-              "type": "Until"
             },
-            "with-directory": {
-              "runAfter": {
-                "base-url": [
-                  "Succeeded"
-                ]
-              },
-              "type": "Compose",
-              "inputs": "@if(equals('', coalesce(triggerBody()?['directory'], '')), outputs('base-url'), concat(outputs('base-url'), '&directory=', encodeUriComponent(triggerBody()?['directory'])))"
-            }
-          },
-          "outputs": {}
-        },
-        "parameters": {}
-      }
-    },
-    {
-      "type": "Microsoft.Logic/workflows",
-      "apiVersion": "2017-07-01",
-      "name": "[variables('List Blobs Name')]",
-      "location": "[resourceGroup().location]",
-      "dependsOn": [
-        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Data Lake Identity Name'))]",
-        "[resourceId('Microsoft.Logic/workflows', variables('List Blobs Name'))]"
-      ],
-      "identity": {
-        "type": "UserAssigned",
-        "userAssignedIdentities": {
-          "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Data Lake Identity Name'))]": {}
-        }
-      },
-      "properties": {
-        "definition": {
-          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
-          "contentVersion": "1.0.0.0",
-          "parameters": {},
-          "triggers": {
-            "manual": {
-              "type": "Request",
-              "kind": "Http",
-              "inputs": {
-                "schema": {
-                  "properties": {
-                    "container": {
-                      "type": "string"
+            "properties": {
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
                     },
-                    "directory": {
-                      "type": "string"
+                    "triggers": {
+                        "manual": {
+                            "inputs": {
+                                "schema": {
+                                    "properties": {
+                                        "clusterUri": {
+                                            "type": "string"
+                                        },
+                                        "db": {
+                                            "type": "string"
+                                        },
+                                        "csl": {
+                                            "type": "string"
+                                        },
+                                        "isCommand": {
+                                            "type": "boolean"
+                                        }
+                                    },
+                                    "required": [
+                                        "clusterUri",
+                                        "db",
+                                        "csl",
+                                        "isCommand"
+                                    ],
+                                    "type": "object"
+                                }
+                            },
+                            "kind": "Http",
+                            "operationOptions": "EnableSchemaValidation",
+                            "type": "Request"
+                        }
                     },
-                    "doListDirectories": {
-                      "type": "boolean"
+                    "actions": {
+                        "invoke-kusto": {
+                            "inputs": {
+                                "authentication": {
+                                    "audience": "@triggerBody()?['clusterUri']",
+                                    "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Ingest Identity Name'))]",
+                                    "type": "ManagedServiceIdentity"
+                                },
+                                "body": {
+                                    "csl": "@triggerBody()?['csl']",
+                                    "db": "@triggerBody()?['db']",
+                                    "properties": "{\"Options\":{\"queryconsistency\":\"strongconsistency\"},\"Parameters\":{},\"ClientRequestId\":\"archive-app;42\"}"
+                                },
+                                "headers": {
+                                    "Accept-Encoding": "deflate",
+                                    "Connection": "Keep-Alive",
+                                    "Content-Type": "application/json; charset=utf-8"
+                                },
+                                "method": "POST",
+                                "retryPolicy": {
+                                    "type": "none"
+                                },
+                                "uri": "@concat(triggerBody()?['clusterUri'], if(triggerBody()?['isCommand'], '/v1/rest/mgmt', '/v2/rest/query'))"
+                            },
+                            "limit": {
+                                "timeout": "PT5S"
+                            },
+                            "runAfter": {
+                            },
+                            "type": "Http"
+                        },
+                        "is-command": {
+                            "actions": {
+                                "command-success-response": {
+                                    "inputs": {
+                                        "body": {
+                                            "primary": {
+                                                "rows": "@body('invoke-kusto').Tables[0].Rows",
+                                                "columns": "@body('invoke-kusto').Tables[0].Columns"
+                                            },
+                                            "full": "@body('invoke-kusto')"
+                                        },
+                                        "statusCode": "@outputs('invoke-kusto')['statusCode']"
+                                    },
+                                    "kind": "http",
+                                    "runAfter": {
+                                    },
+                                    "type": "Response"
+                                }
+                            },
+                            "else": {
+                                "actions": {
+                                    "primary-result": {
+                                        "inputs": {
+                                            "from": "@body('invoke-kusto')",
+                                            "where": "@equals(item()?.TableKind, 'PrimaryResult')"
+                                        },
+                                        "runAfter": {
+                                        },
+                                        "type": "Query"
+                                    },
+                                    "query-success-response": {
+                                        "inputs": {
+                                            "body": {
+                                                "primary": {
+                                                    "rows": "@body('primary-result')[0].Rows",
+                                                    "columns": "@body('primary-result')[0].Columns"
+                                                },
+                                                "full": "@body('invoke-kusto')"
+                                            },
+                                            "statusCode": "@outputs('invoke-kusto')['statusCode']"
+                                        },
+                                        "kind": "http",
+                                        "runAfter": {
+                                            "primary-result": [
+                                                "Succeeded"
+                                            ]
+                                        },
+                                        "type": "Response"
+                                    }
+                                }
+                            },
+                            "expression": "@triggerBody()?['isCommand']",
+                            "runAfter": {
+                                "invoke-kusto": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "If"
+                        },
+                        "failure-response": {
+                            "inputs": {
+                                "body": "@concat('Failure at Kusto:  ', body('invoke-kusto'))",
+                                "statusCode": "@outputs('invoke-kusto')['statusCode']"
+                            },
+                            "kind": "http",
+                            "runAfter": {
+                                "invoke-kusto": [
+                                    "Failed"
+                                ]
+                            },
+                            "type": "Response"
+                        }
                     },
-                    "storageAccount": {
-                      "type": "string"
-                    },
-                    "suffix": {
-                      "type": "string"
+                    "outputs": {
                     }
-                  },
-                  "required": [
-                    "storageAccount",
-                    "container"
-                  ],
-                  "type": "object"
+                },
+                "parameters": {
                 }
-              },
-              "operationOptions": "EnableSchemaValidation"
             }
-          },
-          "actions": {},
-          "outputs": {}
         },
-        "parameters": {}
-      }
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "[variables('Ingest Directory Name')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Logic/workflows', variables('List Blobs Name'))]"
+            ],
+            "properties": {
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {},
+                    "triggers": {
+                        "manual": {
+                            "type": "Request",
+                            "kind": "Http",
+                            "inputs": {
+                                "schema": {
+                                    "properties": {
+                                        "container": {
+                                            "type": "string"
+                                        },
+                                        "directory": {
+                                            "type": "string"
+                                        },
+                                        "doListDirectories": {
+                                            "type": "boolean"
+                                        },
+                                        "storageAccount": {
+                                            "type": "string"
+                                        },
+                                        "suffix": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "storageAccount",
+                                        "container"
+                                    ],
+                                    "type": "object"
+                                }
+                            },
+                            "operationOptions": "EnableSchemaValidation"
+                        }
+                    },
+                    "actions": {},
+                    "outputs": {}
+                },
+                "parameters": {}
+            }
+        }
+    ],
+    "outputs": {
+        "data-lake-id": {
+            "type": "object",
+            "value": "[reference(variables('Ingest Identity Name'), '2018-11-30')]"
+        }
     }
-  ],
-  "outputs": {
-    "data-lake-id": {
-      "type": "object",
-      "value": "[reference(variables('Data Lake Identity Name'), '2018-11-30')]"
-    }
-  }
 }
