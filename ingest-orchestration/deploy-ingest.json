@@ -647,7 +647,7 @@
                             "inputs": {
                                 "body": {
                                     "batches": "@variables('batches')",
-                                    "blobCount":"@outputs('total-blobs')"
+                                    "blobCount": "@outputs('total-blobs')"
                                 },
                                 "statusCode": 200
                             },
@@ -700,7 +700,7 @@
                                     "type": "Compose"
                                 },
                                 "compose-order-query": {
-                                    "inputs": "let data = dynamic(\n@{string(outputs('blob-chunk'))}\n);\nprint data=data\n| mv-expand data\n| evaluate bag_unpack(data)\n| extend contentLength=tolong(contentLength)\n| parse name with * \"year=\" year:int \"/month=\" month:int \"/day=\" day:int \"/\" *\n| extend creationTime=make_datetime(year, month, day)\n| extend e = pack(\"name\", name, \"contentLength\", contentLength)\n| summarize blobs=make_list(e) by creationTime\n| extend p = pack(\"creationTime\", creationTime, \"blobs\", blobs)\n| summarize make_list(p)",
+                                    "inputs": "let data = dynamic(\n@{string(outputs('blob-chunk'))}\n);\nprint data=data\n| mv-expand data\n| evaluate bag_unpack(data)\n| extend contentLength=tolong(contentLength)\n| parse name with * \"year=\" year:int \"/month=\" month:int \"/day=\" day:int \"/\" *\n| extend creationTime=make_datetime(year, month, day)\n| extend e = pack(\"name\", name, \"contentLength\", contentLength)\n| summarize blobs=make_list(name) by creationTime\n| extend p = pack(\"creationTime\", creationTime, \"blobs\", blobs)\n| summarize make_list(p)",
                                     "runAfter": {
                                         "set-blobs": [
                                             "Succeeded"
