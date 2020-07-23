@@ -7,7 +7,7 @@
         "List Blobs Name": "[concat('list-blobs-api-', variables('Unique ID'))]",
         "Kusto API Name": "[concat('kusto-api-', variables('Unique ID'))]",
         "Ingest Directory Name": "[concat('ingest-directory-api-', variables('Unique ID'))]",
-        "List Blobs By Creation Time Name": "[concat('list-blobs-by-creation-time-api-', variables('Unique ID'))]"
+        "Batch Blobs Name": "[concat('batch-blobs-api-', variables('Unique ID'))]"
     },
     "resources": [
         {
@@ -482,7 +482,7 @@
         {
             "type": "Microsoft.Logic/workflows",
             "apiVersion": "2017-07-01",
-            "name": "[variables('List Blobs By Creation Time Name')]",
+            "name": "[variables('Batch Blobs Name')]",
             "location": "[resourceGroup().location]",
             "dependsOn": [
                 "[resourceId('Microsoft.Logic/workflows', variables('List Blobs Name'))]",
@@ -542,19 +542,6 @@
                             "runAfter": {},
                             "type": "Workflow"
                         },
-                        "response-success": {
-                            "inputs": {
-                                "body": "@body('select-groups')",
-                                "statusCode": 200
-                            },
-                            "kind": "Http",
-                            "runAfter": {
-                                "select-groups": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Response"
-                        },
                         "select-blobs": {
                             "inputs": {
                                 "from": "@body('list-blobs')['blobs']",
@@ -584,6 +571,210 @@
                                 ]
                             },
                             "type": "Select"
+                        },
+                        "emptySet": {
+                            "inputs": [],
+                            "runAfter": {
+                                "select-groups": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose"
+                        },
+                        "init-batches": {
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "batches",
+                                        "type": "array"
+                                    }
+                                ]
+                            },
+                            "runAfter": {
+                                "select-groups": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "InitializeVariable"
+                        },
+                        "init-remains": {
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "remains",
+                                        "type": "array",
+                                        "value": "@body('select-groups')"
+                                    }
+                                ]
+                            },
+                            "runAfter": {
+                                "select-groups": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "InitializeVariable"
+                        },
+                        "until-batched": {
+                            "actions": {
+                                "compose-batching-query": {
+                                    "inputs": "let contentLengthThreshold = @{parameters('defaultContentLengthThreshold')};\nlet data = dynamic(\n@{variables('remains')}\n);\nprint data=data\n| mv-expand data\n| evaluate bag_unpack(data)\n| mv-expand blobs\n| evaluate bag_unpack(blobs)\n| serialize\n| extend newCreationTime = (creationTime != prev(creationTime))\n| extend groupSum = row_cumsum(contentLength, newCreationTime)\n| extend partOfBatch = (groupSum<=contentLengthThreshold or newCreationTime)\n| extend p = pack(\"name\", name, \"contentLength\", contentLength)\n| summarize blobs=make_list(p) by creationTime, partOfBatch\n| extend p = pack(\"creationTime\", creationTime, \"blobs\", blobs)\n| summarize list=make_list(p) by partOfBatch\n| extend p = pack(iif(partOfBatch, \"newBatches\", \"remains\"), list)\n| summarize bag=make_bag(p)",
+                                    "runAfter": {},
+                                    "type": "Compose"
+                                },
+                                "if-remains": {
+                                    "actions": {
+                                        "remains": {
+                                            "inputs": "@body('iterative-batch').primary.rows[0][0].remains",
+                                            "runAfter": {},
+                                            "type": "Compose"
+                                        },
+                                        "set-remains": {
+                                            "inputs": {
+                                                "name": "remains",
+                                                "value": "@outputs('remains')"
+                                            },
+                                            "runAfter": {
+                                                "remains": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "SetVariable"
+                                        }
+                                    },
+                                    "else": {
+                                        "actions": {
+                                            "set-empty-remains": {
+                                                "inputs": {
+                                                    "name": "remains",
+                                                    "value": "@outputs('emptySet')"
+                                                },
+                                                "runAfter": {},
+                                                "type": "SetVariable"
+                                            }
+                                        }
+                                    },
+                                    "expression": "@contains(body('iterative-batch').primary.rows[0][0], 'remains')",
+                                    "runAfter": {
+                                        "iterative-batch": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "If"
+                                },
+                                "iterative-batch": {
+                                    "inputs": {
+                                        "body": {
+                                            "clusterUri": "@triggerBody()['kusto']['clusterUri']",
+                                            "csl": "@{outputs('compose-batching-query')}",
+                                            "db": "@triggerBody()['kusto']['db']",
+                                            "isCommand": false
+                                        },
+                                        "host": {
+                                            "triggerName": "manual",
+                                            "workflow": {
+                                                "id": "[resourceId('Microsoft.Logic/workflows', variables('Kusto API Name'))]"
+                                            }
+                                        }
+                                    },
+                                    "runAfter": {
+                                        "compose-batching-query": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Workflow"
+                                },
+                                "newBatches": {
+                                    "inputs": "@body('iterative-batch').primary.rows[0][0].newBatches",
+                                    "runAfter": {
+                                        "iterative-batch": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Compose"
+                                },
+                                "set-batches": {
+                                    "inputs": {
+                                        "name": "batches",
+                                        "value": "@outputs('totalBatches')"
+                                    },
+                                    "runAfter": {
+                                        "totalBatches": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "SetVariable"
+                                },
+                                "totalBatches": {
+                                    "inputs": "@union(variables('batches'), outputs('newBatches'))",
+                                    "runAfter": {
+                                        "newBatches": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Compose"
+                                }
+                            },
+                            "expression": "@equals(length(variables('remains')), 0)",
+                            "limit": {
+                                "count": 200,
+                                "timeout": "PT1H"
+                            },
+                            "runAfter": {
+                                "emptySet": [
+                                    "Succeeded"
+                                ],
+                                "init-batches": [
+                                    "Succeeded"
+                                ],
+                                "init-remains": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Until"
+                        },
+                        "compose-sort-batches": {
+                            "inputs": "let contentLengthThreshold = 100000000;\nlet data = dynamic(\n@{variables('batches')}\n);\nprint data=data\n| mv-expand data\n| evaluate bag_unpack(data)\n| order by creationTime asc\n| extend p=pack(\"creationTime\", creationTime, \"blobs\", blobs)\n| summarize batches=make_list(p)",
+                            "runAfter": {
+                                "until-batched": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose"
+                        },
+                        "sort-batches": {
+                            "inputs": {
+                                "body": {
+                                    "clusterUri": "@triggerBody()['kusto']['clusterUri']",
+                                    "csl": "@{outputs('compose-sort-batches')}",
+                                    "db": "@triggerBody()['kusto']['db']",
+                                    "isCommand": false
+                                },
+                                "host": {
+                                    "triggerName": "manual",
+                                    "workflow": {
+                                        "id": "[resourceId('Microsoft.Logic/workflows', variables('Kusto API Name'))]"
+                                    }
+                                }
+                            },
+                            "runAfter": {
+                                "compose-sort-batches": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Workflow"
+                        },
+                        "response-success": {
+                            "inputs": {
+                                "body": "@body('select-groups')",
+                                "statusCode": 200
+                            },
+                            "kind": "Http",
+                            "runAfter": {
+                                "select-groups": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Response"
                         }
                     },
                     "contentVersion": "1.0.0.0",
