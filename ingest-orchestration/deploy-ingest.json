@@ -6,7 +6,8 @@
         "Ingest Identity Name": "[concat('ingest-identity-', variables('Unique ID'))]",
         "List Blobs Name": "[concat('list-blobs-api-', variables('Unique ID'))]",
         "Kusto API Name": "[concat('kusto-api-', variables('Unique ID'))]",
-        "Ingest Directory Name": "[concat('ingest-directory-api-', variables('Unique ID'))]"
+        "Ingest Directory Name": "[concat('ingest-directory-api-', variables('Unique ID'))]",
+        "List Blobs By Creation Time Name": "[concat('list-blobs-by-creation-time-api-', variables('Unique ID'))]"
     },
     "resources": [
         {
@@ -476,6 +477,175 @@
                 },
                 "parameters": {
                 }
+            }
+        },
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "[variables('List Blobs By Creation Time Name')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Logic/workflows', variables('List Blobs Name'))]",
+                "[resourceId('Microsoft.Logic/workflows', variables('Kusto API Name'))]"
+            ],
+            "properties": {
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "actions": {
+                        "compose-order-query": {
+                            "inputs": "let data = dynamic(\n@{string(body('select-blobs'))}\n);\nprint data=data\n| mv-expand data\n| evaluate bag_unpack(data)\n| extend contentLength=tolong(contentLength)\n| parse name with * \"year=\" year:int \"/month=\" month:int \"/day=\" day:int \"/\" *\n| extend creationTime=make_datetime(year, month, day)\n| extend e = pack(\"name\", name, \"contentLength\", contentLength)\n| summarize blobs=make_list(e) by creationTime\n",
+                            "runAfter": {
+                                "select-blobs": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose"
+                        },
+                        "group-by-creation-time": {
+                            "inputs": {
+                                "body": {
+                                    "clusterUri": "@triggerBody()['kusto']['clusterUri']",
+                                    "csl": "@{outputs('compose-order-query')}",
+                                    "db": "@triggerBody()['kusto']['db']",
+                                    "isCommand": false
+                                },
+                                "host": {
+                                    "triggerName": "manual",
+                                    "workflow": {
+                                        "id": "[resourceId('Microsoft.Logic/workflows', variables('Kusto API Name'))]"
+                                    }
+                                }
+                            },
+                            "runAfter": {
+                                "compose-order-query": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Workflow"
+                        },
+                        "list-blobs": {
+                            "inputs": {
+                                "body": {
+                                    "container": "@triggerBody()?['storage']?['container']",
+                                    "directory": "@triggerBody()?['storage']?['directory']",
+                                    "doListDirectories": false,
+                                    "storageAccount": "@triggerBody()?['storage']?['storageAccount']",
+                                    "suffix": "@triggerBody()?['storage']?['suffix']"
+                                },
+                                "host": {
+                                    "triggerName": "manual",
+                                    "workflow": {
+                                        "id": "[resourceId('Microsoft.Logic/workflows', variables('List Blobs Name'))]"
+                                    }
+                                }
+                            },
+                            "runAfter": {},
+                            "type": "Workflow"
+                        },
+                        "response-success": {
+                            "inputs": {
+                                "body": "@body('select-groups')",
+                                "statusCode": 200
+                            },
+                            "kind": "Http",
+                            "runAfter": {
+                                "select-groups": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Response"
+                        },
+                        "select-blobs": {
+                            "inputs": {
+                                "from": "@body('list-blobs')['blobs']",
+                                "select": {
+                                    "contentLength": "@item()?['contentLength']",
+                                    "name": "@item()['name']"
+                                }
+                            },
+                            "runAfter": {
+                                "list-blobs": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Select"
+                        },
+                        "select-groups": {
+                            "inputs": {
+                                "from": "@body('group-by-creation-time').primary.rows",
+                                "select": {
+                                    "blobs": "@item()[1]",
+                                    "creationTime": "@item()[0]"
+                                }
+                            },
+                            "runAfter": {
+                                "group-by-creation-time": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Select"
+                        }
+                    },
+                    "contentVersion": "1.0.0.0",
+                    "outputs": {},
+                    "parameters": {},
+                    "triggers": {
+                        "manual": {
+                            "inputs": {
+                                "schema": {
+                                    "properties": {
+                                        "kusto": {
+                                            "properties": {
+                                                "clusterUri": {
+                                                    "type": "string"
+                                                },
+                                                "db": {
+                                                    "type": "string"
+                                                }
+                                            },
+                                            "required": [
+                                                "clusterUri",
+                                                "db"
+                                            ],
+                                            "type": "object"
+                                        },
+                                        "storage": {
+                                            "properties": {
+                                                "container": {
+                                                    "type": "string"
+                                                },
+                                                "directory": {
+                                                    "type": "string"
+                                                },
+                                                "storageAccount": {
+                                                    "type": "string"
+                                                },
+                                                "suffix": {
+                                                    "type": "string"
+                                                }
+                                            },
+                                            "required": [
+                                                "storageAccount",
+                                                "container",
+                                                "directory"
+                                            ],
+                                            "type": "object"
+                                        }
+                                    },
+                                    "required": [
+                                        "storage",
+                                        "kusto"
+                                    ],
+                                    "type": "object"
+                                }
+                            },
+                            "kind": "Http",
+                            "operationOptions": "EnableSchemaValidation",
+                            "type": "Request"
+                        }
+                    }
+                },
+                "parameters": {}
             }
         },
         {
