@@ -113,6 +113,7 @@
                                         ]
                                     },
                                     "type": "Response",
+                                    "operationOptions": "Asynchronous",
                                     "kind": "Http",
                                     "inputs": {
                                         "body": {
@@ -134,6 +135,7 @@
                                         "runAfter": {},
                                         "type": "Response",
                                         "kind": "Http",
+                                        "operationOptions": "Asynchronous",
                                         "inputs": {
                                             "body": {
                                                 "blobs": "@body('blobs')"
@@ -191,6 +193,7 @@
                             },
                             "type": "Response",
                             "kind": "Http",
+                            "operationOptions": "Asynchronous",
                             "inputs": {
                                 "body": "@variables('error')",
                                 "statusCode": 500
@@ -769,8 +772,9 @@
                                 "statusCode": 200
                             },
                             "kind": "Http",
+                            "operationOptions": "Asynchronous",
                             "runAfter": {
-                                "select-groups": [
+                                "sort-batches": [
                                     "Succeeded"
                                 ]
                             },
@@ -779,7 +783,16 @@
                     },
                     "contentVersion": "1.0.0.0",
                     "outputs": {},
-                    "parameters": {},
+                    "parameters": {
+                        "defaultContentLengthThreshold": {
+                            "defaultValue": 100000000,
+                            "type": "Int"
+                        },
+                        "chunkSize": {
+                            "defaultValue": 100,
+                            "type": "Int"
+                        }
+                    },
                     "triggers": {
                         "manual": {
                             "inputs": {

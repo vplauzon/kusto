@@ -12,3 +12,5 @@ See the [following article](TODO) for details.
 •	It could map a column to the blob path originating the data
 •	It could stamp the data with the “date” of the data following the blob path and spark standard year=XYZ/month=ABC/day=WXY, so we could then manage caching / retention 
 •	It could be restarted without creating duplicates, essentially continuing where it stopped
+•	Control the debit (e.g. 1 file at a time)
+•	Sample files
