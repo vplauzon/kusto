@@ -645,7 +645,10 @@
                         },
                         "response-success": {
                             "inputs": {
-                                "body": "@variables('batches')",
+                                "body": {
+                                    "batches": "@variables('batches')",
+                                    "blobCount":"@outputs('total-blobs')"
+                                },
                                 "statusCode": 200
                             },
                             "kind": "Http",
@@ -670,6 +673,15 @@
                                 ]
                             },
                             "type": "Select"
+                        },
+                        "total-blobs": {
+                            "inputs": "@length(variables('blobs'))",
+                            "runAfter": {
+                                "if-sample": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose"
                         },
                         "until-blobs": {
                             "actions": {
@@ -861,7 +873,7 @@
                                 "timeout": "PT1H"
                             },
                             "runAfter": {
-                                "if-sample": [
+                                "total-blobs": [
                                     "Succeeded"
                                 ]
                             },
