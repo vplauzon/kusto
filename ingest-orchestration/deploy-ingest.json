@@ -714,7 +714,7 @@
                                 "if-doMapBlobUrl": {
                                     "actions": {
                                         "compose-single-blobs": {
-                                            "inputs": "let doMapCreationTime = @{triggerBody()?['doMapCreationTime']};\nlet data = dynamic(\n@{string(outputs('blob-chunk'))}\n);\nprint data=data\n| mv-expand data\n| evaluate bag_unpack(data)\n| extend contentLength=tolong(contentLength)\n| parse name with * \"year=\" year:int \"/month=\" month:int \"/day=\" day:int \"/\" *\n| extend creationTime=make_datetime(year, month, day)\n| extend e = pack(\"name\", name, \"contentLength\", contentLength)\n| extend creationTime=iif(doMapCreationTime, creationTime, datetime(null))\n| summarize blobs=make_list(e) by creationTime\n| sort by creationTime asc\n| extend p = pack(\"creationTime\", creationTime, \"blobs\", blobs)\n| summarize make_list(p)",
+                                            "inputs": "let doMapCreationTime = @{triggerBody()?['doMapCreationTime']};\nlet data = dynamic(\n@{string(outputs('blob-chunk'))}\n);\nprint data=data\n| mv-expand data\n| evaluate bag_unpack(data)\n| extend contentLength=tolong(contentLength)\n| parse name with * \"year=\" year:int \"/month=\" month:int \"/day=\" day:int \"/\" *\n| extend creationTime=make_datetime(year, month, day)\n| extend creationTime=iif(doMapCreationTime, creationTime, datetime(null))\n| extend blobs=pack(\"name\", name)\n| summarize blobs=make_list(blobs) by creationTime, name\n| extend e=pack(\"creationTime\", creationTime, \"blobs\", blobs)\n| summarize make_list(e)",
                                             "runAfter": {
                                             },
                                             "type": "Compose"
@@ -742,7 +742,7 @@
                                             "type": "Workflow"
                                         },
                                         "union-batches": {
-                                            "inputs": "@union(outputs('single-blobs').primary.rows[0][0], variables('batches'))",
+                                            "inputs": "@union(body('single-blobs').primary.rows[0][0], variables('batches'))",
                                             "runAfter": {
                                                 "single-blobs": [
                                                     "Succeeded"
