@@ -713,6 +713,55 @@
                                 },
                                 "if-doMapBlobUrl": {
                                     "actions": {
+                                        "compose-single-blobs": {
+                                            "inputs": "let doMapCreationTime = @{triggerBody()?['doMapCreationTime']};\nlet data = dynamic(\n@{string(outputs('blob-chunk'))}\n);\nprint data=data\n| mv-expand data\n| evaluate bag_unpack(data)\n| extend contentLength=tolong(contentLength)\n| parse name with * \"year=\" year:int \"/month=\" month:int \"/day=\" day:int \"/\" *\n| extend creationTime=make_datetime(year, month, day)\n| extend e = pack(\"name\", name, \"contentLength\", contentLength)\n| extend creationTime=iif(doMapCreationTime, creationTime, datetime(null))\n| summarize blobs=make_list(e) by creationTime\n| sort by creationTime asc\n| extend p = pack(\"creationTime\", creationTime, \"blobs\", blobs)\n| summarize make_list(p)",
+                                            "runAfter": {
+                                            },
+                                            "type": "Compose"
+                                        },
+                                        "single-blobs": {
+                                            "inputs": {
+                                                "body": {
+                                                    "clusterUri": "@triggerBody()['kusto']['clusterUri']",
+                                                    "csl": "@{outputs('compose-single-blobs')}",
+                                                    "db": "@triggerBody()['kusto']['db']",
+                                                    "isCommand": false
+                                                },
+                                                "host": {
+                                                    "triggerName": "manual",
+                                                    "workflow": {
+                                                        "id": "[resourceId('Microsoft.Logic/workflows', variables('Kusto API Name'))]"
+                                                    }
+                                                }
+                                            },
+                                            "runAfter": {
+                                                "compose-single-blobs": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "Workflow"
+                                        },
+                                        "union-batches": {
+                                            "inputs": "@union(outputs('single-blobs').primary.rows[0][0], variables('batches'))",
+                                            "runAfter": {
+                                                "single-blobs": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "Compose"
+                                        },
+                                        "set-whole-batch": {
+                                            "inputs": {
+                                                "name": "batches",
+                                                "value": "@outputs('union-batches')"
+                                            },
+                                            "runAfter": {
+                                                "union-batches": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "SetVariable"
+                                        }
                                     },
                                     "else": {
                                         "actions": {
