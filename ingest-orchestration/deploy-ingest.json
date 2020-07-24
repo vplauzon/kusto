@@ -700,7 +700,7 @@
                                     "type": "Compose"
                                 },
                                 "compose-order-query": {
-                                    "inputs": "let data = dynamic(\n@{string(outputs('blob-chunk'))}\n);\nprint data=data\n| mv-expand data\n| evaluate bag_unpack(data)\n| extend contentLength=tolong(contentLength)\n| parse name with * \"year=\" year:int \"/month=\" month:int \"/day=\" day:int \"/\" *\n| extend creationTime=make_datetime(year, month, day)\n| extend e = pack(\"name\", name, \"contentLength\", contentLength)\n| summarize blobs=make_list(name) by creationTime\n| extend p = pack(\"creationTime\", creationTime, \"blobs\", blobs)\n| summarize make_list(p)",
+                                    "inputs": "let doMapCreationTime = @{triggerBody()?['doMapCreationTime']};\nlet data = dynamic(\n@{string(outputs('blob-chunk'))}\n);\nprint data=data\n| mv-expand data\n| evaluate bag_unpack(data)\n| extend contentLength=tolong(contentLength)\n| parse name with * \"year=\" year:int \"/month=\" month:int \"/day=\" day:int \"/\" *\n| extend creationTime=make_datetime(year, month, day)\n| extend e = pack(\"name\", name, \"contentLength\", contentLength)\n| extend creationTime=iif(doMapCreationTime, creationTime, datetime(null))\n| summarize blobs=make_list(e) by creationTime\n| sort by creationTime asc\n| extend p = pack(\"creationTime\", creationTime, \"blobs\", blobs)\n| summarize make_list(p)",
                                     "runAfter": {
                                         "set-blobs": [
                                             "Succeeded"
@@ -756,102 +756,113 @@
                                 },
                                 "until-batched": {
                                     "actions": {
-                                        "compose-batching-query": {
-                                            "inputs": "let contentLengthThreshold = @{parameters('defaultContentLengthThreshold')};\nlet data = dynamic(\n@{variables('remains')}\n);\nprint data=data\n| mv-expand data\n| evaluate bag_unpack(data)\n| mv-expand blobs\n| evaluate bag_unpack(blobs)\n| serialize\n| extend newCreationTime = (creationTime != prev(creationTime))\n| extend groupSum = row_cumsum(contentLength, newCreationTime)\n| extend partOfBatch = (groupSum<=contentLengthThreshold or newCreationTime)\n| extend p = pack(\"name\", name, \"contentLength\", contentLength)\n| summarize blobs=make_list(p) by creationTime, partOfBatch\n| extend p = pack(\"creationTime\", creationTime, \"blobs\", blobs)\n| summarize list=make_list(p) by partOfBatch\n| extend p = pack(iif(partOfBatch, \"newBatches\", \"remains\"), list)\n| summarize bag=make_bag(p)",
-                                            "runAfter": {},
-                                            "type": "Compose"
-                                        },
-                                        "if-remains": {
-                                            "actions": {
-                                                "remains": {
-                                                    "inputs": "@body('iterative-batch').primary.rows[0][0].remains",
-                                                    "runAfter": {},
-                                                    "type": "Compose"
-                                                },
-                                                "set-remains": {
-                                                    "inputs": {
-                                                        "name": "remains",
-                                                        "value": "@outputs('remains')"
-                                                    },
-                                                    "runAfter": {
-                                                        "remains": [
-                                                            "Succeeded"
-                                                        ]
-                                                    },
-                                                    "type": "SetVariable"
-                                                }
-                                            },
+                                        "if-doMapBlobUrl": {
+                                            "actions": {},
                                             "else": {
                                                 "actions": {
-                                                    "set-empty-remains": {
-                                                        "inputs": {
-                                                            "name": "remains",
-                                                            "value": "@outputs('emptySet')"
-                                                        },
+                                                    "compose-batching-query": {
+                                                        "inputs": "let contentLengthThreshold = @{parameters('defaultContentLengthThreshold')};\nlet data = dynamic(\n@{variables('remains')}\n);\nprint data=data\n| mv-expand data\n| evaluate bag_unpack(data)\n| mv-expand blobs\n| evaluate bag_unpack(blobs)\n| serialize\n| extend newCreationTime = (creationTime != prev(creationTime))\n| extend groupSum = row_cumsum(contentLength, newCreationTime)\n| extend partOfBatch = (groupSum<=contentLengthThreshold or newCreationTime)\n| extend p = pack(\"name\", name, \"contentLength\", contentLength)\n| summarize blobs=make_list(p) by creationTime, partOfBatch\n| extend p = pack(\"creationTime\", creationTime, \"blobs\", blobs)\n| summarize list=make_list(p) by partOfBatch\n| extend p = pack(iif(partOfBatch, \"newBatches\", \"remains\"), list)\n| summarize bag=make_bag(p)",
                                                         "runAfter": {},
+                                                        "type": "Compose"
+                                                    },
+                                                    "iterative-batch": {
+                                                        "inputs": {
+                                                            "body": {
+                                                                "clusterUri": "@triggerBody()['kusto']['clusterUri']",
+                                                                "csl": "@{outputs('compose-batching-query')}",
+                                                                "db": "@triggerBody()['kusto']['db']",
+                                                                "isCommand": false
+                                                            },
+                                                            "host": {
+                                                                "triggerName": "manual",
+                                                                "workflow": {
+                                                                    "id": "[resourceId('Microsoft.Logic/workflows', variables('Kusto API Name'))]"
+                                                                }
+                                                            }
+                                                        },
+                                                        "runAfter": {
+                                                            "compose-batching-query": [
+                                                                "Succeeded"
+                                                            ]
+                                                        },
+                                                        "type": "Workflow"
+                                                    },
+                                                    "if-remains": {
+                                                        "actions": {
+                                                            "remains": {
+                                                                "inputs": "@body('iterative-batch').primary.rows[0][0].remains",
+                                                                "runAfter": {},
+                                                                "type": "Compose"
+                                                            },
+                                                            "set-remains": {
+                                                                "inputs": {
+                                                                    "name": "remains",
+                                                                    "value": "@outputs('remains')"
+                                                                },
+                                                                "runAfter": {
+                                                                    "remains": [
+                                                                        "Succeeded"
+                                                                    ]
+                                                                },
+                                                                "type": "SetVariable"
+                                                            }
+                                                        },
+                                                        "else": {
+                                                            "actions": {
+                                                                "set-empty-remains": {
+                                                                    "inputs": {
+                                                                        "name": "remains",
+                                                                        "value": "@outputs('emptySet')"
+                                                                    },
+                                                                    "runAfter": {},
+                                                                    "type": "SetVariable"
+                                                                }
+                                                            }
+                                                        },
+                                                        "expression": "@contains(body('iterative-batch').primary.rows[0][0], 'remains')",
+                                                        "runAfter": {
+                                                            "iterative-batch": [
+                                                                "Succeeded"
+                                                            ]
+                                                        },
+                                                        "type": "If"
+                                                    },
+                                                    "newBatches": {
+                                                        "inputs": "@body('iterative-batch').primary.rows[0][0].newBatches",
+                                                        "runAfter": {
+                                                            "iterative-batch": [
+                                                                "Succeeded"
+                                                            ]
+                                                        },
+                                                        "type": "Compose"
+                                                    },
+                                                    "totalBatches": {
+                                                        "inputs": "@union(variables('batches'), outputs('newBatches'))",
+                                                        "runAfter": {
+                                                            "newBatches": [
+                                                                "Succeeded"
+                                                            ]
+                                                        },
+                                                        "type": "Compose"
+                                                    },
+                                                    "set-batches": {
+                                                        "inputs": {
+                                                            "name": "batches",
+                                                            "value": "@outputs('totalBatches')"
+                                                        },
+                                                        "runAfter": {
+                                                            "totalBatches": [
+                                                                "Succeeded"
+                                                            ]
+                                                        },
                                                         "type": "SetVariable"
                                                     }
                                                 }
                                             },
-                                            "expression": "@contains(body('iterative-batch').primary.rows[0][0], 'remains')",
+                                            "expression": "@triggerBody('doMapBlobUrl')",
                                             "runAfter": {
-                                                "iterative-batch": [
-                                                    "Succeeded"
-                                                ]
                                             },
                                             "type": "If"
-                                        },
-                                        "iterative-batch": {
-                                            "inputs": {
-                                                "body": {
-                                                    "clusterUri": "@triggerBody()['kusto']['clusterUri']",
-                                                    "csl": "@{outputs('compose-batching-query')}",
-                                                    "db": "@triggerBody()['kusto']['db']",
-                                                    "isCommand": false
-                                                },
-                                                "host": {
-                                                    "triggerName": "manual",
-                                                    "workflow": {
-                                                        "id": "[resourceId('Microsoft.Logic/workflows', variables('Kusto API Name'))]"
-                                                    }
-                                                }
-                                            },
-                                            "runAfter": {
-                                                "compose-batching-query": [
-                                                    "Succeeded"
-                                                ]
-                                            },
-                                            "type": "Workflow"
-                                        },
-                                        "newBatches": {
-                                            "inputs": "@body('iterative-batch').primary.rows[0][0].newBatches",
-                                            "runAfter": {
-                                                "iterative-batch": [
-                                                    "Succeeded"
-                                                ]
-                                            },
-                                            "type": "Compose"
-                                        },
-                                        "set-batches": {
-                                            "inputs": {
-                                                "name": "batches",
-                                                "value": "@outputs('totalBatches')"
-                                            },
-                                            "runAfter": {
-                                                "totalBatches": [
-                                                    "Succeeded"
-                                                ]
-                                            },
-                                            "type": "SetVariable"
-                                        },
-                                        "totalBatches": {
-                                            "inputs": "@union(variables('batches'), outputs('newBatches'))",
-                                            "runAfter": {
-                                                "newBatches": [
-                                                    "Succeeded"
-                                                ]
-                                            },
-                                            "type": "Compose"
                                         }
                                     },
                                     "expression": "@equals(length(variables('remains')), 0)",
@@ -888,7 +899,7 @@
                             "type": "Int"
                         },
                         "defaultContentLengthThreshold": {
-                            "defaultValue": 100000000,
+                            "defaultValue": 600000000,
                             "type": "Int"
                         }
                     },
@@ -911,6 +922,12 @@
                                                 "db"
                                             ],
                                             "type": "object"
+                                        },
+                                        "doMapBlobUrl": {
+                                            "type": "boolean"
+                                        },
+                                        "doMapCreationTime": {
+                                            "type": "boolean"
                                         },
                                         "sampleSize": {
                                             "type": "integer"
