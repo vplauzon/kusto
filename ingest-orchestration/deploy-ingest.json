@@ -870,7 +870,7 @@
                                             }
                                         }
                                     },
-                                    "expression": "@triggerBody('doMapBlobUrl')",
+                                    "expression": "@triggerBody()?['doMapBlobUrl']",
                                     "runAfter": {
                                         "set-blobs": [
                                             "Succeeded"
