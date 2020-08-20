@@ -1,0 +1,171 @@
+//  Let's start with some data we would ingest in real time at very short intervals (i.e. seconds)
+//  That data lands in the following table
+.create table invoices(EMPLOYE_NAME:string, AMOUNT:long, DEPARTMENT_ID:int)
+
+//  Let's have an update policy on that table
+//  First, let's have a lookup table used to transform the invoices data
+//  Let's feed that lookup table with some values
+.set-or-append departments <|
+    datatable(id:int, department:string)
+    [
+        1, "Corp",
+        2, "HR",
+        3, "Engineering",
+        4, "Sales",
+        5, "Finance",
+        6, "Operation"
+    ]
+
+//  Let's define a function for the update policy
+.create-or-alter function transformInvoices(){
+    invoices
+    | join kind=inner departments on $left.DEPARTMENT_ID==$right.id
+    | project EMPLOYE_NAME, AMOUNT, department
+}
+
+//  We will land the transformed data in the following table
+.set-or-append prettyInvoices <| parseLanding()
+    | limit 0
+
+//  Let's create an update policy to transform the data from invoices to transformedInvoices
+.alter table prettyInvoices policy update
+@'[{"IsEnabled": true, "Source": "invoices", "Query": "transformInvoices", "IsTransactional": true, "PropagateIngestionProperties": true}]'
+
+//  Let's insert some data to see all this mechanic working
+.set-or-append invoices <|
+    datatable(EMPLOYE_NAME:string, AMOUNT:long, DEPARTMENT_ID:int)
+    [
+        "Bob", 5, 2,
+        "Carol", 20, 2,
+        "Alice", 10, 3
+    ]
+
+//  We can validate the data landed in invoices:
+invoices
+
+//  We validate the update policy transformed the data:
+prettyInvoices
+
+//  We have our baseline ready
+//  Let's explore different change management scenarios
+
+
+//  Scenario:  adding column
+
+//  We want to add a column to our table since we have more properties
+//  coming up from upstream
+//  Let's first clone our invoices table to try the changes there
+.set-or-replace invoicesClone <|
+    invoices
+    | limit 10
+
+//  Let's alter that clone
+.alter-merge table invoicesClone(approvalDuration:timespan)
+
+//  The new column is there, at the end
+//  The new column is empty (NULL)
+invoicesClone
+| limit 5
+
+//  Maybe we don't like to have the new column at the end
+//  We can alter the table again to fix that
+//  Let's first get its "declared schema"
+.show table invoicesClone cslschema
+
+//  We can then easily flip things around
+.alter table invoicesClone(EMPLOYE_NAME:string, AMOUNT:long, approvalDuration:timespan, DEPARTMENT_ID:int)
+
+//  The new column isn't at the end anymore
+invoicesClone
+| limit 5
+
+//  We're pretty confident about the procedure
+//  So, let's do it on the real table
+.alter table invoices(EMPLOYE_NAME:string, AMOUNT:long, approvalDuration:timespan, DEPARTMENT_ID:int)
+
+//  The table schema is as expected
+invoices
+| limit 10
+
+//  Let's check it didn't break the update policies by ingesting more data
+//  Here we simulate that the new column isn't mapped in the upstream process (e.g. event hub ingestion),
+//  hence it is still null
+//  ADX-QUESTION:  Is that true?  If a column isn't mapped, does it simply take NULL or does it fail the ingestion?
+.set-or-append invoices <|
+    datatable(EMPLOYE_NAME:string, AMOUNT:long, approvalDuration:timespan, DEPARTMENT_ID:int)
+    [
+        "Dany", 15, timespan(null), 4,
+        "Ethan", 21, timespan(null), 3
+    ]
+
+//  The table content is as expected
+invoices
+| limit 10
+
+//  So is the content of the transformed data
+prettyInvoices
+| limit 10
+
+//  Let's cleanup
+.drop table invoicesClone
+
+//  Now, let's similarly change the schema of the transformed data
+.alter table prettyInvoices(EMPLOYE_NAME:string, AMOUNT:long, approvalDuration:timespan, department:string)
+
+//  Assuming ingestion is continuing in real time
+.set-or-append invoices <|
+    datatable(EMPLOYE_NAME:string, AMOUNT:long, approvalDuration:timespan, DEPARTMENT_ID:int)
+    [
+        "Francine", 11, timespan(null), 5
+    ]
+//  We can see that no extents are returned:  something is wrong
+
+//  We can see failures occured because of schema compatibility issue
+.show ingestion failures
+| where Table == "invoices" or Table == "prettyInvoices"
+//  The issue is the update policy returns a result set not containing the new column
+
+//  In order to pull this off on a continuous ingestion,
+//  we would need to change the update policy at the same time we change the schema
+//  i.e. in the same transaction
+//  ADX-QUESTION:  Can we do an .alter table and an .alter table policy in a single transaction?
+//  ADX-QUESTION:  Alternatively, can we do an .alter table and an .alter function in a single transaction?
+//  ADX-QUESTION:  Alternatively, what would you propose to do this?  I could think of an over-fancy update policy
+//  returning a different schema (using bags) depending on the schema of the target table...  seems convoluted (not even sure that would work).
+//  The other way would be to create temp tables, alter them, rename them in batch and then move extents
+//  But in a case of a big "update policies hierarchy", that is unpractical
+//  Another way could be to land the original data in a temp table, transform everything and then move the extents of that temp table in the original one to trigger the update policies
+
+//  Here we change the update policy function to include the duration column
+.create-or-alter function transformInvoices(){
+    invoices
+    | join kind=inner departments on $left.DEPARTMENT_ID==$right.id
+    | project EMPLOYE_NAME, AMOUNT, approvalDuration, department
+}
+
+//  Now the ingestion should pass
+.set-or-append invoices <|
+    datatable(EMPLOYE_NAME:string, AMOUNT:long, approvalDuration:timespan, DEPARTMENT_ID:int)
+    [
+        "Gaston", 8, timespan(null), 1
+    ]
+//  We get 2 extents, one for each table
+
+//  We get the expected content
+prettyInvoices
+| limit 10
+
+//  We can now change the upstream mapping to map the duration column
+.set-or-append invoices <|
+    datatable(EMPLOYE_NAME:string, AMOUNT:long, approvalDuration:timespan, DEPARTMENT_ID:int)
+    [
+        "Hadleigh", 8, 4h, 1
+    ]
+
+//  The duration data now flows through
+prettyInvoices
+| limit 10
+
+
+//  Scenario:  renaming column
+//  Scenario:  changing column type

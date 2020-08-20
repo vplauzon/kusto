@@ -495,14 +495,78 @@
                 "definition": {
                     "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
                     "actions": {
-                        "emptySet": {
-                            "inputs": [],
+                        "chunk-count": {
+                            "inputs": "@add(1, div(length(variables('names')), parameters('chunkSize')))",
                             "runAfter": {
-                                "select-blobs": [
+                                "if-sample": [
                                     "Succeeded"
                                 ]
                             },
                             "type": "Compose"
+                        },
+                        "for-each-chunk": {
+                            "actions": {
+                                "accumulates-blobs": {
+                                    "inputs": "@union(variables('blobs'), body('kusto-parse').primary.rows[0][0])",
+                                    "runAfter": {
+                                        "kusto-parse": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Compose"
+                                },
+                                "chunk": {
+                                    "inputs": "@take(skip(variables('names'), mul(item(), parameters('chunkSize'))), parameters('chunkSize'))",
+                                    "runAfter": {},
+                                    "type": "Compose"
+                                },
+                                "kusto-parse": {
+                                    "inputs": {
+                                        "body": {
+                                            "clusterUri": "@triggerBody()['kusto']['clusterUri']",
+                                            "csl": "let names = dynamic(\n@{outputs('chunk')}\n);\nprint name=names\n| mv-expand name\n| evaluate bag_unpack(name)\n| parse name with * \"year=\" year:int \"/month=\" month:int \"/day=\" day:int \"/\" *\n| extend creationTime=make_datetime(year, month, day)\n| order by creationTime desc\n| extend blobs=pack(\"name\", name, \"creationTime\", creationTime)\n| summarize blobs=make_list(blobs)",
+                                            "db": "@triggerBody()['kusto']['db']",
+                                            "isCommand": false
+                                        },
+                                        "host": {
+                                            "triggerName": "manual",
+                                            "workflow": {
+                                                "id": "[resourceId('Microsoft.Logic/workflows', variables('Kusto API Name'))]"
+                                            }
+                                        }
+                                    },
+                                    "runAfter": {
+                                        "chunk": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Workflow"
+                                },
+                                "set-blobs": {
+                                    "inputs": {
+                                        "name": "blobs",
+                                        "value": "@outputs('accumulates-blobs')"
+                                    },
+                                    "runAfter": {
+                                        "accumulates-blobs": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "SetVariable"
+                                }
+                            },
+                            "foreach": "@range(0, outputs('chunk-count'))",
+                            "runAfter": {
+                                "init-blobs": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "runtimeConfiguration": {
+                                "concurrency": {
+                                    "repetitions": 1
+                                }
+                            },
+                            "type": "Foreach"
                         },
                         "if-sample": {
                             "actions": {
@@ -510,7 +574,7 @@
                                     "inputs": {
                                         "body": {
                                             "clusterUri": "@triggerBody()['kusto']['clusterUri']",
-                                            "csl": "print data = range(0, @{sub(length(variables('blobs')), 1)})\n| mv-expand data\n| sample @{triggerBody()?['sampleSize']}\n| summarize make_list(data)",
+                                            "csl": "print data = range(0, @{sub(length(body('select-blob-names')), 1)})\n| mv-expand data\n| sample @{triggerBody()?['sampleSize']}\n| summarize make_list(data)",
                                             "db": "@triggerBody()['kusto']['db']",
                                             "isCommand": false
                                         },
@@ -536,7 +600,7 @@
                                 "select-sample": {
                                     "inputs": {
                                         "from": "@outputs('sample-indices')",
-                                        "select": "@variables('blobs')[item()]"
+                                        "select": "@body('select-blob-names')[item()]"
                                     },
                                     "runAfter": {
                                         "sample-indices": [
@@ -545,9 +609,9 @@
                                     },
                                     "type": "Select"
                                 },
-                                "set-sample-blobs": {
+                                "set-sample-names": {
                                     "inputs": {
-                                        "name": "blobs",
+                                        "name": "names",
                                         "value": "@body('select-sample')"
                                     },
                                     "runAfter": {
@@ -558,67 +622,53 @@
                                     "type": "SetVariable"
                                 }
                             },
-                            "expression": "@and(not(equals(coalesce(triggerBody()?['sampleSize'], '42'), '42')), greater(length(variables('blobs')), triggerBody()?['sampleSize']), greater(triggerBody()?['sampleSize'], 0))",
+                            "else": {
+                                "actions": {
+                                    "set-all-names": {
+                                        "inputs": {
+                                            "name": "names",
+                                            "value": "@body('select-blob-names')"
+                                        },
+                                        "runAfter": {},
+                                        "type": "SetVariable"
+                                    }
+                                }
+                            },
+                            "expression": "@and(not(equals(coalesce(triggerBody()?['sampleSize'], '42'), '42')), greater(length(body('select-blob-names')), triggerBody()?['sampleSize']), greater(triggerBody()?['sampleSize'], 0))",
                             "runAfter": {
-                                "emptySet": [
-                                    "Succeeded"
-                                ],
-                                "init-batches": [
-                                    "Succeeded"
-                                ],
-                                "init-blobs": [
-                                    "Succeeded"
-                                ],
-                                "init-remains": [
+                                "init-names": [
                                     "Succeeded"
                                 ]
                             },
                             "type": "If"
-                        },
-                        "init-batches": {
-                            "inputs": {
-                                "variables": [
-                                    {
-                                        "name": "batches",
-                                        "type": "array"
-                                    }
-                                ]
-                            },
-                            "runAfter": {
-                                "select-blobs": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "InitializeVariable"
                         },
                         "init-blobs": {
                             "inputs": {
                                 "variables": [
                                     {
                                         "name": "blobs",
-                                        "type": "array",
-                                        "value": "@body('select-blobs')"
-                                    }
-                                ]
-                            },
-                            "runAfter": {
-                                "select-blobs": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "InitializeVariable"
-                        },
-                        "init-remains": {
-                            "inputs": {
-                                "variables": [
-                                    {
-                                        "name": "remains",
                                         "type": "array"
                                     }
                                 ]
                             },
                             "runAfter": {
-                                "select-blobs": [
+                                "chunk-count": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "InitializeVariable"
+                        },
+                        "init-names": {
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "names",
+                                        "type": "array"
+                                    }
+                                ]
+                            },
+                            "runAfter": {
+                                "select-blob-names": [
                                     "Succeeded"
                                 ]
                             },
@@ -646,26 +696,24 @@
                         "response-success": {
                             "inputs": {
                                 "body": {
-                                    "batches": "@variables('batches')",
-                                    "blobCount": "@outputs('total-blobs')"
+                                    "blobCount": "@length(body('select-blob-names'))",
+                                    "blobs": "@variables('blobs')",
+                                    "sampleBlobCount": "@length(variables('blobs'))"
                                 },
                                 "statusCode": 200
                             },
                             "kind": "Http",
                             "runAfter": {
-                                "until-blobs": [
+                                "for-each-chunk": [
                                     "Succeeded"
                                 ]
                             },
                             "type": "Response"
                         },
-                        "select-blobs": {
+                        "select-blob-names": {
                             "inputs": {
                                 "from": "@body('list-blobs')['blobs']",
-                                "select": {
-                                    "contentLength": "@item()?['contentLength']",
-                                    "name": "@item()['name']"
-                                }
+                                "select": "@item()['name']"
                             },
                             "runAfter": {
                                 "list-blobs": [
@@ -673,283 +721,13 @@
                                 ]
                             },
                             "type": "Select"
-                        },
-                        "total-blobs": {
-                            "inputs": "@length(variables('blobs'))",
-                            "runAfter": {
-                                "if-sample": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Compose"
-                        },
-                        "until-blobs": {
-                            "actions": {
-                                "blob-chunk": {
-                                    "inputs": "@take(variables('blobs'), parameters('chunkSize'))",
-                                    "runAfter": {},
-                                    "type": "Compose"
-                                },
-                                "blobs-minus-chunk": {
-                                    "inputs": "@skip(variables('blobs'), parameters('chunkSize'))",
-                                    "runAfter": {
-                                        "blob-chunk": [
-                                            "Succeeded"
-                                        ]
-                                    },
-                                    "type": "Compose"
-                                },
-                                "set-blobs": {
-                                    "inputs": {
-                                        "name": "blobs",
-                                        "value": "@outputs('blobs-minus-chunk')"
-                                    },
-                                    "runAfter": {
-                                        "blobs-minus-chunk": [
-                                            "Succeeded"
-                                        ]
-                                    },
-                                    "type": "SetVariable"
-                                },
-                                "if-doMapBlobUrl": {
-                                    "actions": {
-                                        "compose-single-blobs": {
-                                            "inputs": "let doMapCreationTime = @{triggerBody()?['doMapCreationTime']};\nlet data = dynamic(\n@{string(outputs('blob-chunk'))}\n);\nprint data=data\n| mv-expand data\n| evaluate bag_unpack(data)\n| extend contentLength=tolong(contentLength)\n| parse name with * \"year=\" year:int \"/month=\" month:int \"/day=\" day:int \"/\" *\n| extend creationTime=make_datetime(year, month, day)\n| extend creationTime=iif(doMapCreationTime, creationTime, datetime(null))\n| extend blobs=pack(\"name\", name)\n| summarize blobs=make_list(blobs) by creationTime, name\n| extend e=pack(\"creationTime\", creationTime, \"blobs\", blobs)\n| summarize make_list(e)",
-                                            "runAfter": {
-                                            },
-                                            "type": "Compose"
-                                        },
-                                        "single-blobs": {
-                                            "inputs": {
-                                                "body": {
-                                                    "clusterUri": "@triggerBody()['kusto']['clusterUri']",
-                                                    "csl": "@{outputs('compose-single-blobs')}",
-                                                    "db": "@triggerBody()['kusto']['db']",
-                                                    "isCommand": false
-                                                },
-                                                "host": {
-                                                    "triggerName": "manual",
-                                                    "workflow": {
-                                                        "id": "[resourceId('Microsoft.Logic/workflows', variables('Kusto API Name'))]"
-                                                    }
-                                                }
-                                            },
-                                            "runAfter": {
-                                                "compose-single-blobs": [
-                                                    "Succeeded"
-                                                ]
-                                            },
-                                            "type": "Workflow"
-                                        },
-                                        "union-batches": {
-                                            "inputs": "@union(body('single-blobs').primary.rows[0][0], variables('batches'))",
-                                            "runAfter": {
-                                                "single-blobs": [
-                                                    "Succeeded"
-                                                ]
-                                            },
-                                            "type": "Compose"
-                                        },
-                                        "set-whole-batch": {
-                                            "inputs": {
-                                                "name": "batches",
-                                                "value": "@outputs('union-batches')"
-                                            },
-                                            "runAfter": {
-                                                "union-batches": [
-                                                    "Succeeded"
-                                                ]
-                                            },
-                                            "type": "SetVariable"
-                                        }
-                                    },
-                                    "else": {
-                                        "actions": {
-                                            "compose-order-query": {
-                                                "inputs": "let doMapCreationTime = @{triggerBody()?['doMapCreationTime']};\nlet data = dynamic(\n@{string(outputs('blob-chunk'))}\n);\nprint data=data\n| mv-expand data\n| evaluate bag_unpack(data)\n| extend contentLength=tolong(contentLength)\n| parse name with * \"year=\" year:int \"/month=\" month:int \"/day=\" day:int \"/\" *\n| extend creationTime=make_datetime(year, month, day)\n| extend e = pack(\"name\", name, \"contentLength\", contentLength)\n| extend creationTime=iif(doMapCreationTime, creationTime, datetime(null))\n| summarize blobs=make_list(e) by creationTime\n| sort by creationTime asc\n| extend p = pack(\"creationTime\", creationTime, \"blobs\", blobs)\n| summarize make_list(p)",
-                                                "runAfter": {
-                                                },
-                                                "type": "Compose"
-                                            },
-                                            "group-by-creation-time": {
-                                                "inputs": {
-                                                    "body": {
-                                                        "clusterUri": "@triggerBody()['kusto']['clusterUri']",
-                                                        "csl": "@{outputs('compose-order-query')}",
-                                                        "db": "@triggerBody()['kusto']['db']",
-                                                        "isCommand": false
-                                                    },
-                                                    "host": {
-                                                        "triggerName": "manual",
-                                                        "workflow": {
-                                                            "id": "[resourceId('Microsoft.Logic/workflows', variables('Kusto API Name'))]"
-                                                        }
-                                                    }
-                                                },
-                                                "runAfter": {
-                                                    "compose-order-query": [
-                                                        "Succeeded"
-                                                    ]
-                                                },
-                                                "type": "Workflow"
-                                            },
-                                            "set-init-remains": {
-                                                "inputs": {
-                                                    "name": "remains",
-                                                    "value": "@body('group-by-creation-time').primary.rows[0][0]"
-                                                },
-                                                "runAfter": {
-                                                    "group-by-creation-time": [
-                                                        "Succeeded"
-                                                    ]
-                                                },
-                                                "type": "SetVariable"
-                                            },
-                                            "until-batched": {
-                                                "actions": {
-                                                    "compose-batching-query": {
-                                                        "inputs": "let contentLengthThreshold = @{parameters('defaultContentLengthThreshold')};\nlet data = dynamic(\n@{variables('remains')}\n);\nprint data=data\n| mv-expand data\n| evaluate bag_unpack(data)\n| mv-expand blobs\n| evaluate bag_unpack(blobs)\n| serialize\n| extend newCreationTime = (creationTime != prev(creationTime))\n| extend groupSum = row_cumsum(contentLength, newCreationTime)\n| extend partOfBatch = (groupSum<=contentLengthThreshold or newCreationTime)\n| extend p = pack(\"name\", name)\n| summarize blobs=make_list(p) by creationTime, partOfBatch\n| extend p = pack(\"creationTime\", creationTime, \"blobs\", blobs)\n| summarize list=make_list(p) by partOfBatch\n| extend p = pack(iif(partOfBatch, \"newBatches\", \"remains\"), list)\n| summarize bag=make_bag(p)",
-                                                        "runAfter": {},
-                                                        "type": "Compose"
-                                                    },
-                                                    "iterative-batch": {
-                                                        "inputs": {
-                                                            "body": {
-                                                                "clusterUri": "@triggerBody()['kusto']['clusterUri']",
-                                                                "csl": "@{outputs('compose-batching-query')}",
-                                                                "db": "@triggerBody()['kusto']['db']",
-                                                                "isCommand": false
-                                                            },
-                                                            "host": {
-                                                                "triggerName": "manual",
-                                                                "workflow": {
-                                                                    "id": "[resourceId('Microsoft.Logic/workflows', variables('Kusto API Name'))]"
-                                                                }
-                                                            }
-                                                        },
-                                                        "runAfter": {
-                                                            "compose-batching-query": [
-                                                                "Succeeded"
-                                                            ]
-                                                        },
-                                                        "type": "Workflow"
-                                                    },
-                                                    "if-remains": {
-                                                        "actions": {
-                                                            "remains": {
-                                                                "inputs": "@body('iterative-batch').primary.rows[0][0].remains",
-                                                                "runAfter": {},
-                                                                "type": "Compose"
-                                                            },
-                                                            "set-remains": {
-                                                                "inputs": {
-                                                                    "name": "remains",
-                                                                    "value": "@outputs('remains')"
-                                                                },
-                                                                "runAfter": {
-                                                                    "remains": [
-                                                                        "Succeeded"
-                                                                    ]
-                                                                },
-                                                                "type": "SetVariable"
-                                                            }
-                                                        },
-                                                        "else": {
-                                                            "actions": {
-                                                                "set-empty-remains": {
-                                                                    "inputs": {
-                                                                        "name": "remains",
-                                                                        "value": "@outputs('emptySet')"
-                                                                    },
-                                                                    "runAfter": {},
-                                                                    "type": "SetVariable"
-                                                                }
-                                                            }
-                                                        },
-                                                        "expression": "@contains(body('iterative-batch').primary.rows[0][0], 'remains')",
-                                                        "runAfter": {
-                                                            "iterative-batch": [
-                                                                "Succeeded"
-                                                            ]
-                                                        },
-                                                        "type": "If"
-                                                    },
-                                                    "newBatches": {
-                                                        "inputs": "@body('iterative-batch').primary.rows[0][0].newBatches",
-                                                        "runAfter": {
-                                                            "iterative-batch": [
-                                                                "Succeeded"
-                                                            ]
-                                                        },
-                                                        "type": "Compose"
-                                                    },
-                                                    "totalBatches": {
-                                                        "inputs": "@union(variables('batches'), outputs('newBatches'))",
-                                                        "runAfter": {
-                                                            "newBatches": [
-                                                                "Succeeded"
-                                                            ]
-                                                        },
-                                                        "type": "Compose"
-                                                    },
-                                                    "set-batches": {
-                                                        "inputs": {
-                                                            "name": "batches",
-                                                            "value": "@outputs('totalBatches')"
-                                                        },
-                                                        "runAfter": {
-                                                            "totalBatches": [
-                                                                "Succeeded"
-                                                            ]
-                                                        },
-                                                        "type": "SetVariable"
-                                                    }
-                                                },
-                                                "expression": "@equals(length(variables('remains')), 0)",
-                                                "limit": {
-                                                    "count": 20,
-                                                    "timeout": "PT1H"
-                                                },
-                                                "runAfter": {
-                                                    "set-init-remains": [
-                                                        "Succeeded"
-                                                    ]
-                                                },
-                                                "type": "Until"
-                                            }
-                                        }
-                                    },
-                                    "expression": "@triggerBody()?['doMapBlobUrl']",
-                                    "runAfter": {
-                                        "set-blobs": [
-                                            "Succeeded"
-                                        ]
-                                    },
-                                    "type": "If"
-                                }
-                            },
-                            "expression": "@equals('', '')",
-                            "limit": {
-                                "count": 60,
-                                "timeout": "PT1H"
-                            },
-                            "runAfter": {
-                                "total-blobs": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "Until"
                         }
                     },
                     "contentVersion": "1.0.0.0",
                     "outputs": {},
                     "parameters": {
                         "chunkSize": {
-                            "defaultValue": 100,
-                            "type": "Int"
-                        },
-                        "defaultContentLengthThreshold": {
-                            "defaultValue": 600000000,
+                            "defaultValue": 300,
                             "type": "Int"
                         }
                     },
@@ -972,12 +750,6 @@
                                                 "db"
                                             ],
                                             "type": "object"
-                                        },
-                                        "doMapBlobUrl": {
-                                            "type": "boolean"
-                                        },
-                                        "doMapCreationTime": {
-                                            "type": "boolean"
                                         },
                                         "sampleSize": {
                                             "type": "integer"
