@@ -1,3 +1,3 @@
 # Merge late arrival
 
-See the [following article](TODO) for details.
+No article has been published on that.
