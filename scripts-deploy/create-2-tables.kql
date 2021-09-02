@@ -1,0 +1,3 @@
+.create table Canary(Level:string, Timestamp:datetime, UserId:string, TraceId:string, Message:string, ProcessId:int32)
+
+.create table Dog(name:string)

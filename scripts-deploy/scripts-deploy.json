@@ -1,0 +1,62 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "scriptUrl": {
+            "type": "string"
+        },
+        "scriptUrlSasToken": {
+            "type": "string"
+        }
+    },
+    "variables": {
+        "Unique ID": "[uniqueString(concat(resourceGroup().id, 'scripts-deploy'))]",
+        "Cluster": "[concat('cluster', variables('Unique ID'))]",
+        "DB": "my-db"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Kusto/clusters",
+            "apiVersion": "2021-01-01",
+            "name": "[variables('Cluster')]",
+            "location": "[resourceGroup().location]",
+            "sku": {
+                "capacity": 1,
+                "name": "Dev(No SLA)_Standard_E2a_v4",
+                "tier": "Basic"
+            },
+            "properties": {
+                "engineType": "V3"
+            },
+            "resources": [
+                {
+                    "type": "databases",
+                    "apiVersion": "2021-01-01",
+                    "name": "[variables('DB')]",
+                    "kind": "ReadWrite",
+                    "dependsOn": [
+                        "[resourceId('Microsoft.Kusto/clusters', variables('Cluster'))]"
+                    ],
+                    "resources": [
+                        {
+                            "type": "scripts",
+                            "apiVersion": "2021-01-01",
+                            "name": "my-script",
+                            "dependsOn": [
+                                "[resourceId('Microsoft.Kusto/clusters/databases', variables('Cluster'), variables('DB'))]"
+                            ],
+                            "properties": {
+                                "continueOnErrors": true,
+                                "forceUpdateTag": "[deployment().name]",
+                                "scriptUrl": "[parameters('scriptUrl')]",
+                                "scriptUrlSasToken": "[parameters('scriptUrlSasToken')]"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    ],
+    "outputs": {
+    }
+}
