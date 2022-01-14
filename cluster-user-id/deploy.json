@@ -1,0 +1,43 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {},
+    "variables": {
+        "Cluster Name": "[concat('cluster', uniqueString(resourceGroup().id))]",
+        "Identity Name": "sample-identity"
+    },
+    "resources": [
+        {
+            "name": "[variables('Identity Name')]",
+            "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+            "apiVersion": "2018-11-30",
+            "location": "[resourceGroup().location]"
+        },
+        {
+            "name": "[variables('Cluster Name')]",
+            "type": "Microsoft.Kusto/clusters",
+            "apiVersion": "2021-01-01",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Identity Name'))]"
+            ],
+            "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": {
+                    "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Identity Name'))]":{}
+                }
+            },
+            "sku": {
+                "name": "Dev(No SLA)_Standard_E2a_v4",
+                "tier": "Basic",
+                "capacity": 1
+            }
+        }
+    ],
+    "outputs": {
+        "q": {
+            "type": "string",
+            "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('Identity Name'))]"
+        }
+    }
+}
